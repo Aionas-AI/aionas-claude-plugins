@@ -1,0 +1,17 @@
+{
+  "methods": [
+    {"method_id": "handoff", "state": "on", "required": false, "self_override_allowed": true, "self_release_allowed": true, "source_scope": "default", "released": false,
+     "params": {"threshold_tokens": 200000, "idle_minutes": 55, "nested": {"x": "y"}}},
+    {"method_id": "noisy_guard", "state": "off", "required": false, "self_override_allowed": false, "self_release_allowed": false, "source_scope": "org", "released": false, "params": null},
+    {"method_id": "output_store", "state": "on", "required": false, "self_override_allowed": true, "self_release_allowed": true, "source_scope": "person", "released": true},
+    {"method_id": "effort_default", "state": "on", "required": false, "self_override_allowed": false, "self_release_allowed": true, "source_scope": "team"},
+    {"method_id": "cache_guard", "state": "off", "required": true, "self_override_allowed": true, "self_release_allowed": true},
+    {"method_id": "not_a_method", "state": "off", "required": false, "self_override_allowed": false, "self_release_allowed": false},
+    {"method_id": "write_minimum", "state": "maybe", "required": false, "self_override_allowed": false, "self_release_allowed": false}
+  ],
+  "overrides": [
+    {"id": "ovr_1", "user_id": "u1", "method_id": "subagent_sonnet", "status": "self", "from_at": "2026-10-20T10:00:00Z", "until_at": "2026-10-20T11:00:00Z", "reason": "debugging a flaky test", "created_at": "2026-10-20T10:00:00Z"},
+    {"id": "ovr_2", "user_id": "u1", "method_id": "seat_fit", "status": "requested", "from_at": null, "until_at": null, "reason": null, "created_at": "2026-10-20T10:00:00Z"},
+    {"id": "ovr_3", "user_id": "u1", "method_id": "cache_alert", "status": "approved", "from_at": "2026-10-20T10:00:00+00:00", "until_at": "2026-10-20T10:30:00Z", "created_at": "2026-10-20T10:00:00Z"}
+  ]
+}

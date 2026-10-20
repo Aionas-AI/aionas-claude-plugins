@@ -1,0 +1,11 @@
+{
+  "name": "aionas-savings",
+  "version": "0.1.0",
+  "description": "Aionas savings methods for Claude Code: your organization's savings policy, applied on this computer. Only numbers and names leave the computer.",
+  "author": {
+    "name": "Aionas"
+  },
+  "homepage": "https://github.com/Aionas-AI/aionas-claude-plugins",
+  "repository": "https://github.com/Aionas-AI/aionas-claude-plugins",
+  "keywords": ["aionas", "savings", "cost", "tokens"]
+}

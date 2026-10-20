@@ -1,0 +1,18 @@
+{
+  "name": "aionas",
+  "owner": {
+    "name": "Aionas"
+  },
+  "metadata": {
+    "description": "Aionas plugins for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "aionas-savings",
+      "source": "./plugins/aionas-savings",
+      "description": "Aionas savings methods for Claude Code: your organization's savings policy, applied on this computer. Only numbers and names leave the computer.",
+      "version": "0.1.0",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+# aionas-savings: helpers shared by the noisy-command guard (pretool-guard.sh),
+# the long-output store (posttool-store.sh) and bin/aionas-recall (AIO-860).
+# Source it after lib/aionas.sh. POSIX sh; awk runs with LC_ALL=C so every
+# length is in bytes. Nothing here sends anything: stored outputs stay on
+# this computer, and only counters (numbers) are queued.
+
+AIONAS_GS_HOOKS=${AIONAS_GS_HOOKS:-$AIONAS_PLUGIN_ROOT/hooks}
+AIONAS_GS_RULES=${AIONAS_GS_RULES:-$AIONAS_PLUGIN_ROOT/rules/guard-store.tsv}
+
+# aionas_gs_setting NAME DEFAULT: a "setting" row of the rule file.
+aionas_gs_setting() {
+  _gss=$(awk -F '\t' -v k="$1" '$1 == "setting" && $2 == k { print $3; exit }' "$AIONAS_GS_RULES" 2>/dev/null)
+  if [ -n "$_gss" ]; then echo "$_gss"; else echo "$2"; fi
+}
+
+# aionas_gs_rules_version: the "version" row of the rule file.
+aionas_gs_rules_version() {
+  awk -F '\t' '$1 == "version" { print $2; exit }' "$AIONAS_GS_RULES" 2>/dev/null
+}
+
+# aionas_gs_int VALUE DEFAULT: VALUE when it is a whole number, else DEFAULT.
+aionas_gs_int() {
+  if aionas_is_uint "$1" && [ "$1" -ge 1 ]; then echo "$1"; else echo "$2"; fi
+}
+
+# aionas_gs_cc_version [TRANSCRIPT]: the running Claude Code version, from
+# AIONAS_CC_VERSION (tests), then AI_AGENT (claude-code_2-1-299_harness, set
+# by Claude Code for its child processes), then the newest "version" field in
+# the session transcript. Prints nothing when unknown.
+aionas_gs_cc_version() {
+  if [ -n "${AIONAS_CC_VERSION:-}" ]; then echo "$AIONAS_CC_VERSION"; return 0; fi
+  case "${AI_AGENT:-}" in
+    claude-code_[0-9]*)
+      _gv=${AI_AGENT#claude-code_}
+      _gv=${_gv%%_*}
+      echo "$_gv" | tr '-' '.'
+      return 0
+      ;;
+  esac
+  if [ -n "${1:-}" ] && [ -f "$1" ]; then
+    tail -n 20 "$1" 2>/dev/null | grep -o '"version":"[0-9][0-9.]*"' | tail -n 1 | tr -dc '0-9.'
+  fi
+}
+
+# aionas_gs_version_ge A B: exit 0 when version A >= B (dotted numbers).
+aionas_gs_version_ge() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    if (a !~ /^[0-9]+(\.[0-9]+)*$/ || b !~ /^[0-9]+(\.[0-9]+)*$/) exit 1
+    na = split(a, x, "."); nb = split(b, y, "."); n = na > nb ? na : nb
+    for (i = 1; i <= n; i++) { p = x[i] + 0; q = y[i] + 0; if (p > q) exit 0; if (p < q) exit 1 }
+    exit 0 }'
+}
+
+# aionas_gs_store_dir: where full outputs are kept (this computer only).
+aionas_gs_store_dir() { echo "$(aionas_savings_dir)/store"; }
+
+# aionas_gs_store_active [TRANSCRIPT]: the version probe. Exit 0 when Claude
+# Code is at least min_claude_code (a rewritten Bash output is only honoured
+# in the exact shape the probed version expects). Writes store.status (only
+# when it changes): "active|inactive <TAB> version <TAB> minimum".
+aionas_gs_store_active() {
+  _ga_min=$(aionas_gs_setting min_claude_code 2.1.299)
+  _ga_v=$(aionas_gs_cc_version "${1:-}")
+  if [ -n "$_ga_v" ] && aionas_gs_version_ge "$_ga_v" "$_ga_min"; then _ga_s=active; else _ga_s=inactive; fi
+  _ga_line=$(printf '%s\t%s\t%s' "$_ga_s" "${_ga_v:-unknown}" "$_ga_min")
+  _ga_f="$(aionas_savings_dir)/store.status"
+  if [ "$(cat "$_ga_f" 2>/dev/null)" != "$_ga_line" ]; then
+    aionas_mkdir "$(aionas_savings_dir)" && printf '%s\n' "$_ga_line" | aionas_write_atomic "$_ga_f"
+  fi
+  [ "$_ga_s" = active ]
+}
+
+# aionas_gs_status_text: one line for people ("store active ..." or
+# "store inactive ...").
+aionas_gs_status_text() {
+  _gt_f="$(aionas_savings_dir)/store.status"
+  if [ ! -f "$_gt_f" ]; then echo "store status unknown: no tool output seen yet"; return 0; fi
+  awk -F '\t' 'NR == 1 {
+    if ($1 == "active") printf "store active (Claude Code %s, minimum %s)\n", $2, $3
+    else printf "store inactive (Claude Code %s is below the minimum %s, or unknown): outputs are left untouched\n", $2, $3
+  }' "$_gt_f"
+}
+
+# aionas_gs_match CMDFILE: classify the JSON-escaped Bash command in CMDFILE
+# (one line) against the rule file. Prints one line, fields separated by
+# \037: status id kind new_command guard_id program
+#   status  match | bypass | skip | none | complex
+aionas_gs_match() {
+  LC_ALL=C awk -f "$AIONAS_GS_HOOKS/pretool-guard.awk" "$AIONAS_GS_RULES" "$1"
+}
+
+# aionas_gs_hash FILE: 12 hex characters of the SHA-256 of FILE's bytes.
+aionas_gs_hash() {
+  _gh=$( (shasum -a 256 "$1" || sha256sum "$1" || openssl dgst -sha256 -r "$1") 2>/dev/null | awk 'NR == 1 { print $1 }')
+  case "$_gh" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
+      echo "$_gh" | cut -c1-12 ;;
+    *) cksum "$1" | awk '{ printf "%08x%04x\n", $1, $2 % 65536 }' ;;
+  esac
+}
+
+# aionas_gs_retention_days: Claude Code's cleanupPeriodDays (default 30,
+# at least 1), from the user settings file.
+aionas_gs_retention_days() {
+  _gr_cfg="${CLAUDE_CONFIG_DIR:-$(aionas_home)/.claude}/settings.json"
+  _gr_d=$(aionas_json_flatten "$_gr_cfg" 2>/dev/null | aionas_json_get cleanupPeriodDays 2>/dev/null)
+  aionas_gs_int "$_gr_d" 30
+}
+
+# aionas_gs_prune: at most once a day, remove stored outputs older than the
+# retention (one file at a time; never recursive).
+aionas_gs_prune() {
+  _gp_dir=$(aionas_gs_store_dir)
+  [ -d "$_gp_dir" ] || return 0
+  _gp_now=$(aionas_now)
+  _gp_last=$(cat "$_gp_dir/.pruned" 2>/dev/null)
+  aionas_is_uint "$_gp_last" || _gp_last=0
+  [ $((_gp_now - _gp_last)) -ge 86400 ] || return 0
+  echo "$_gp_now" | aionas_write_atomic "$_gp_dir/.pruned"
+  find "$_gp_dir" -maxdepth 1 -type f -name 'out_*.txt' -mtime +"$(aionas_gs_retention_days)" 2>/dev/null |
+    while IFS= read -r _gp_f; do rm -f "$_gp_f"; done
+  return 0
+}

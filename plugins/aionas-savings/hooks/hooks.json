@@ -1,5 +1,6 @@
 {
-  "description": "aionas-savings: every hook entry of the plugin. Each command runs one script under hooks/; SessionStart entries run in the background and never delay the session.",
+  "description": "aionas-savings: every hook entry of the plugin. Each command runs one script under hooks/; SessionStart entries run in the background and never delay the session. The mod (band, slash commands, effort grant) is hooks/mod.tsx.",
+  "modules": ["./mod.tsx"],
   "hooks": {
     "SessionStart": [
       {

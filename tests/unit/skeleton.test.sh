@@ -61,6 +61,7 @@ test_stubs_exit_0_print_nothing_change_nothing() {
   t_enroll
   before=$(cd "$HOME" && find . | sort)
   for f in "$T_PLUGIN"/hooks/*.sh; do
+    grep -q 'STUB (wave-24 skeleton)' "$f" || continue # a lane filled it; its own tests cover it
     out=$(printf '{"session_id":"s1","hook_event_name":"X","tool_name":"Bash","tool_input":{"command":"ls"}}' | bash "$f")
     t_rc 0 bash "$f" </dev/null
     t_eq "" "$out" "$(basename "$f") printed something"

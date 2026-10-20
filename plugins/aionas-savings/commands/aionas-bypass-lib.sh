@@ -179,3 +179,290 @@ aionas_effort_request_level() {
     "$(aionas_savings_dir)/effort-requests.tsv" 2>/dev/null)
   echo "${_rl:-xhigh}"
 }
+
+# --- the aionas mod band (wave-24 mod spec §4, §5) ---------------------------
+#
+# More files under $(aionas_savings_dir):
+#   requests.tsv     overrides this computer sent for approval: method created
+#                    (shown as "request pending" until the next policy sync
+#                    says otherwise; kept 1 day)
+#   local-ends.tsv   bypasses ended here early (the band's chip, --end):
+#                    method ended   The server row keeps its own end time (no
+#                    route ends it early), so a sync that brings it back is
+#                    stripped again from the cache and the pins (kept 30 days).
+#
+# Privacy (W24-4): the band's facts are numbers and names only; --band and
+# --end make no network call, and nothing here reads the alias credential.
+
+# The client methods in the band's chip order (cache_alert, seat_fit and the
+# required cache_guard never get a chip).
+AIONAS_BAND_METHODS="effort_default subagent_sonnet noisy_guard output_store handoff unused_services write_minimum"
+AIONAS_BAND_NAME_MAX=80
+AIONAS_POLICY_SYNC_INTERVAL=${AIONAS_POLICY_SYNC_INTERVAL:-3600}
+
+# aionas_band_tz_offset: the local UTC offset in seconds (+0300 -> 10800).
+aionas_band_tz_offset() {
+  _tz=$(date +%z 2>/dev/null)
+  case "$_tz" in
+    [+-][0-9][0-9][0-9][0-9])
+      awk -v z="$_tz" 'BEGIN { s = (substr(z, 1, 1) == "-") ? -1 : 1; print s * (substr(z, 2, 2) * 3600 + substr(z, 4, 2) * 60) }' </dev/null
+      ;;
+    *) echo 0 ;;
+  esac
+}
+
+# aionas_band_policy FILE: the "me" and "savings" lines from the raw policy
+# answer (policy.json). Both blocks are optional: an old server, a missing or
+# malformed block prints nothing for it. Strings are JSON-decoded, control
+# characters (tabs, newlines) become spaces, and each name is cut at 80
+# characters on a UTF-8 boundary; an empty or null name prints "-".
+aionas_band_policy() {
+  [ -f "$1" ] || return 0
+  _bp=$(aionas_json_flatten "$1" 2>/dev/null | LC_ALL=C awk -F '\t' -v max="$AIONAS_BAND_NAME_MAX" '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    function hex4(h,   i, c, v) {
+      if (length(h) < 4) return -1
+      v = 0
+      for (i = 1; i <= 4; i++) {
+        c = index("0123456789abcdef", tolower(substr(h, i, 1)))
+        if (c == 0) return -1
+        v = v * 16 + c - 1
+      }
+      return v
+    }
+    function utf8(v) {
+      if (v < 32 || v == 127) return " "
+      if (v < 128) return sprintf("%c", v)
+      if (v < 2048) return sprintf("%c%c", 192 + int(v / 64), 128 + v % 64)
+      if (v < 65536) return sprintf("%c%c%c", 224 + int(v / 4096), 128 + int(v / 64) % 64, 128 + v % 64)
+      return sprintf("%c%c%c%c", 240 + int(v / 262144), 128 + int(v / 4096) % 64, 128 + int(v / 64) % 64, 128 + v % 64)
+    }
+    function decode(s,   o, k, c, v, w) {
+      o = ""
+      while ((k = index(s, "\\")) > 0) {
+        o = o substr(s, 1, k - 1); c = substr(s, k + 1, 1); s = substr(s, k + 2)
+        if (c == "u") {
+          v = hex4(substr(s, 1, 4))
+          if (v < 0) { o = o "?"; continue }
+          s = substr(s, 5)
+          if (v >= 55296 && v < 56320 && substr(s, 1, 2) == "\\u") {
+            w = hex4(substr(s, 3, 4))
+            if (w >= 56320 && w < 57344) { s = substr(s, 7); o = o utf8(65536 + (v - 55296) * 1024 + (w - 56320)); continue }
+          }
+          o = o ((v >= 55296 && v < 57344) ? "?" : utf8(v))
+        } else if (c == "n" || c == "t" || c == "r" || c == "b" || c == "f") o = o " "
+        else o = o c
+      }
+      return o s
+    }
+    function clean(s,   n, i, out, b, chars) {
+      gsub(/[\001-\037\177]/, " ", s)
+      gsub(/^ +| +$/, "", s)
+      n = length(s); out = ""; chars = 0
+      for (i = 1; i <= n; i++) {
+        b = ord[substr(s, i, 1)]
+        if (b < 128 || b >= 192) { chars++; if (chars > max) break }
+        out = out substr(s, i, 1)
+      }
+      sub(/ +$/, "", out)
+      return out == "" ? "-" : out
+    }
+    function name(k) { return (k in ty && ty[k] == "s") ? clean(decode(va[k])) : "-" }
+    function num(k) { return (k in ty && ty[k] == "n" && va[k] ~ /^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$/) ? va[k] : "-" }
+    function uint(k) { return (k in ty && ty[k] == "n" && va[k] ~ /^[0-9]+$/ && length(va[k]) <= 15) ? va[k] : 0 }
+    $1 ~ /^(me|savings)(\.|$)/ { ty[$1] = $2; va[$1] = $3 }
+    END {
+      if (ty["me"] == "o" && name("me.display_name") != "-")
+        printf "me\t%s\t%s\t%s\t%s\t%s\n", name("me.display_name"), name("me.org_name"), name("me.role"), name("me.lead_name"), name("me.computer_name")
+      mk = (ty["savings.money_kind"] == "s") ? va["savings.money_kind"] : ""
+      if (ty["savings"] == "o" && (mk == "usd" || mk == "api_value")) {
+        d = (ty["savings.since_on_date"] == "s" && va["savings.since_on_date"] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) ? va["savings.since_on_date"] : "-"
+        printf "savings\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mk, num("savings.today_usd"), num("savings.since_on_usd"), uint("savings.today_tokens"), uint("savings.since_on_tokens"), d, name("savings.as_of")
+      }
+    }')
+  [ -n "$_bp" ] || return 0
+  printf '%s\n' "$_bp" | while IFS= read -r _bp_l; do
+    case "$_bp_l" in
+      savings"	"*)
+        _bp_iso=${_bp_l##*"	"}
+        _bp_e=$(awk -v mode=epoch -v iso="$_bp_iso" -f "$AIONAS_LIB/time.awk" </dev/null 2>/dev/null)
+        aionas_is_uint "$_bp_e" || _bp_e=0
+        printf '%s\t%s\n' "${_bp_l%"	"*}" "$_bp_e"
+        ;;
+      *) printf '%s\n' "$_bp_l" ;;
+    esac
+  done
+}
+
+# aionas_band_methods SESSION_ID: one "method" line per band method, then
+# "window" and "compact_at", in one awk pass over the session's pin (else the
+# last good cache), the last good cache (requests), local-overrides.tsv,
+# requests.tsv, the effort window and today's counters:
+#   method <id> <on|off> <active> <self_override> <released> <bypass_until|0> <request_pending> <fired_today>
+#   window <xhigh|max|-> <until|0> <session grant|->
+#   compact_at <tokens> <idle minutes>
+# Mirrors lib/policy.sh: no row = on, self-override allowed; a released method
+# is off; a self or approved override in force (server or local) bypasses it.
+aionas_band_methods() {
+  _bm_dir=$(aionas_savings_dir)
+  _bm_pin=$(_aionas_policy_file "$1" 2>/dev/null) || _bm_pin=""
+  _bm_grant=-
+  if _aionas_sid_ok "$1" && [ -f "$_bm_dir/sessions/$1.effort" ]; then
+    _bm_grant=$(cat "$_bm_dir/sessions/$1.effort" 2>/dev/null)
+    case "$_bm_grant" in high | xhigh | max | free) ;; *) _bm_grant=- ;; esac
+  fi
+  set --
+  for _bm_f in "$_bm_dir/counters/queue.tsv" "$_bm_dir/counters/pending.tsv" "$_bm_dir"/counters/batch.*; do
+    [ -f "$_bm_f" ] && set -- "$@" "$_bm_f"
+  done
+  awk -F '\t' -v now="$(aionas_now)" -v today="$(aionas_day_utc)" -v methods="$AIONAS_BAND_METHODS" \
+    -v pin="$_bm_pin" -v cache="$_bm_dir/policy.cache" -v local="$_bm_dir/local-overrides.tsv" \
+    -v req="$_bm_dir/requests.tsv" -v win="$_bm_dir/effort-window" -v grant="$_bm_grant" '
+    function rows(f, kind,   l, a) {
+      if (f == "") return
+      while ((getline l < f) > 0) {
+        split(l, a, "\t")
+        if (kind == "pin") {
+          if (a[1] == "M") { row[a[2]] = 1; st[a[2]] = a[3]; so[a[2]] = a[5]; rl[a[2]] = a[7] }
+          else if (a[1] == "O" && (a[3] == "self" || a[3] == "approved") && a[4] <= now && (a[5] == 0 || a[5] > now)) {
+            byp[a[2]] = 1
+            if (a[5] == 0) open[a[2]] = 1; else if (a[5] > until[a[2]]) until[a[2]] = a[5]
+          } else if (a[1] == "P" && a[2] == "handoff" && a[3] == "threshold_tokens" && a[5] ~ /^[0-9]+$/) th = a[5]
+          else if (a[1] == "P" && a[2] == "handoff" && a[3] == "idle_minutes" && a[5] ~ /^[0-9]+$/) idle = a[5]
+        } else if (kind == "cache") {
+          if (a[1] == "F") fetched = a[2] + 0
+          else if (a[1] == "O" && a[3] == "requested") pend[a[2]] = 1
+        } else if (kind == "local") {
+          if ((a[2] == "self" || a[2] == "approved") && a[3] <= now && a[4] > now) {
+            byp[a[1]] = 1; if (a[4] > until[a[1]]) until[a[1]] = a[4]
+          }
+        } else if (kind == "req") {
+          if (a[2] ~ /^[0-9]+$/) { if (a[2] > lastreq[a[1]]) lastreq[a[1]] = a[2] }
+        } else if (kind == "win") {
+          if (a[1] ~ /^[0-9]+$/ && a[2] ~ /^[0-9]+$/ && a[1] <= now && a[2] > now && (a[3] == "xhigh" || a[3] == "max")) { wl = a[3]; wu = a[2] }
+        }
+      }
+      close(f)
+    }
+    BEGIN {
+      th = 200000; idle = 55; wl = "-"; wu = 0; fetched = 0
+      rows(pin, "pin"); rows(cache, "cache"); rows(local, "local"); rows(req, "req"); rows(win, "win")
+      for (m in lastreq) if (lastreq[m] > fetched && now - lastreq[m] < 86400) pend[m] = 1
+    }
+    NF == 4 && $1 == today && $3 == "fired" && $4 ~ /^[0-9]+$/ { fired[$2] += $4 }
+    END {
+      n = split(methods, ml, " ")
+      for (k = 1; k <= n; k++) {
+        m = ml[k]
+        s = "on"; o = 1; r = 0
+        if (m in row) { r = (rl[m] == 1); o = (so[m] == 1); if (st[m] == "off" || r) s = "off" }
+        a = (s == "on" && !(m in byp))
+        u = ((m in byp) && !(m in open)) ? until[m] : 0
+        printf "method\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\n", m, s, a, o, r, u, (m in pend) ? 1 : 0, fired[m] + 0
+      }
+      printf "window\t%s\t%d\t%s\n", wl, wu, grant
+      printf "compact_at\t%s\t%s\n", th, idle
+    }' "$@" </dev/null
+}
+
+# aionas_band_gateway_host: the enrolled gateway's host[:port], or "-".
+aionas_band_gateway_host() {
+  _gh=$(aionas_enroll_gateway 2>/dev/null) || { echo -; return 0; }
+  _gh=${_gh#*://}
+  echo "${_gh%%/*}" | tr 'A-Z' 'a-z'
+}
+
+# aionas_band SESSION_ID: everything the band draws (mod spec §5, --band),
+# tab separated, numbers and names only. Leads with "clock <now> <utc offset
+# seconds>" so the band shows local times the way this computer does.
+aionas_band() {
+  aionas_bypass_apply_ends "$1" >/dev/null 2>&1
+  printf 'clock\t%s\t%s\n' "$(aionas_now)" "$(aionas_band_tz_offset)"
+  aionas_band_policy "$(aionas_savings_dir)/policy.json"
+  aionas_band_methods "$1"
+  printf 'gateway_host\t%s\n' "$(aionas_band_gateway_host)"
+}
+
+# aionas_request_add METHOD: remember a request sent (or queued) for approval,
+# so the band shows "request pending" before the next policy sync.
+aionas_request_add() {
+  aionas_is_method "$1" || return 2
+  aionas_mkdir "$(aionas_savings_dir)" || return 1
+  _ra_f="$(aionas_savings_dir)/requests.tsv"
+  _ra_now=$(aionas_now)
+  {
+    [ -f "$_ra_f" ] && awk -F '\t' -v old=$((_ra_now - 86400)) 'NF == 2 && $2 > old' "$_ra_f"
+    printf '%s\t%s\n' "$1" "$_ra_now"
+  } | aionas_write_atomic "$_ra_f"
+}
+
+# aionas_bypass_end METHOD: end my bypass of METHOD on this computer now, with
+# no network call: drop its local rows, remember the end (local-ends.tsv) and
+# strip the server's in-force row of it from the cache and every session pin.
+# Exit 0 when a bypass was in force, 1 when there was none, 2 for a method
+# that cannot be bypassed.
+aionas_bypass_end() {
+  aionas_is_method "$1" || return 2
+  aionas_is_required "$1" && return 2
+  _be_dir=$(aionas_savings_dir)
+  aionas_mkdir "$_be_dir" || return 1
+  _be_now=$(aionas_now)
+  _be_was=1
+  _be_l="$_be_dir/local-overrides.tsv"
+  if [ -f "$_be_l" ]; then
+    awk -F '\t' -v m="$1" -v now="$_be_now" '$1 == m && ($2 == "self" || $2 == "approved") && $3 <= now && $4 > now { f = 1 } END { exit f ? 0 : 1 }' "$_be_l" && _be_was=0
+    awk -F '\t' -v m="$1" -v now="$_be_now" '$1 != m && $4 > now' "$_be_l" | aionas_write_atomic "$_be_l"
+  fi
+  _be_e="$_be_dir/local-ends.tsv"
+  {
+    [ -f "$_be_e" ] && awk -F '\t' -v m="$1" -v old=$((_be_now - 2592000)) 'NF == 2 && $1 != m && $2 > old' "$_be_e"
+    printf '%s\t%s\n' "$1" "$_be_now"
+  } | aionas_write_atomic "$_be_e" || return 1
+  aionas_bypass_apply_ends --all && _be_was=0
+  return $_be_was
+}
+
+# aionas_bypass_apply_ends [SESSION_ID | --all]: strip from the last good
+# cache (and the session's pin, or with --all every pin) the server's
+# self/approved override rows that began before a local end of their method.
+# Exit 0 when a row in force now was stripped. Fast when nothing was ended.
+aionas_bypass_apply_ends() {
+  _ae_dir=$(aionas_savings_dir)
+  _ae_e="$_ae_dir/local-ends.tsv"
+  [ -s "$_ae_e" ] || return 1
+  set -- "${1:-}" "$_ae_dir/policy.cache"
+  if [ "$1" = --all ]; then
+    for _ae_p in "$_ae_dir"/sessions/*.cache; do set -- "$@" "$_ae_p"; done
+  elif [ -n "$1" ] && _aionas_sid_ok "$1"; then
+    set -- "$@" "$_ae_dir/sessions/$1.cache"
+  fi
+  shift
+  _ae_now=$(aionas_now)
+  _ae_hit=1
+  for _ae_f in "$@"; do
+    [ -f "$_ae_f" ] || continue
+    grep -q '^O	' "$_ae_f" 2>/dev/null || continue
+    _ae_out=$(awk -F '\t' -v ends="$_ae_e" -v now="$_ae_now" '
+      BEGIN { while ((getline l < ends) > 0) { split(l, a, "\t"); if (a[2] > end[a[1]]) end[a[1]] = a[2] } }
+      $1 == "O" && ($2 in end) && ($3 == "self" || $3 == "approved") && $4 <= end[$2] && ($5 == 0 || $5 > end[$2]) {
+        cut = 1; if ($4 <= now && ($5 == 0 || $5 > now)) live = 1; next
+      }
+      { print }
+      END { exit cut ? (live ? 0 : 3) : 1 }' "$_ae_f")
+    _ae_rc=$?
+    [ $_ae_rc -eq 1 ] && continue
+    printf '%s\n' "$_ae_out" | aionas_write_atomic "$_ae_f"
+    [ $_ae_rc -eq 0 ] && _ae_hit=0
+  done
+  return $_ae_hit
+}
+
+# aionas_policy_sync_due: exit 0 when the last policy sync attempt (any
+# outcome) is older than AIONAS_POLICY_SYNC_INTERVAL (1 hour). With no
+# attempt on record it is not due: the SessionStart sync (policy-sync.sh)
+# makes the first one.
+aionas_policy_sync_due() {
+  _sd_t=$(awk '{ print $1; exit }' "$(aionas_savings_dir)/sync.status" 2>/dev/null)
+  aionas_is_uint "$_sd_t" || return 1
+  [ $(($(aionas_now) - _sd_t)) -ge "$AIONAS_POLICY_SYNC_INTERVAL" ]
+}

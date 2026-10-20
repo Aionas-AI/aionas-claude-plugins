@@ -231,4 +231,14 @@ test_command_file_asks_the_same_session() {
   t_ok grep -q '^description:' "$T_PLUGIN/commands/aionas-handoff.md"
 }
 
+test_command_allows_only_the_prepare_call() {
+  local f="$T_PLUGIN/commands/aionas-handoff.md" line
+  line=$(grep '^allowed-tools:' "$f")
+  t_contains "$line" 'handoff-wake.sh" prepare'
+  # no bare Bash, no Bash(bash:*), no wildcard that starts with anything but the one script
+  t_eq "" "$(printf '%s' "$line" | grep -E 'Bash\(bash:\*\)|Bash\(\*|Bash\(bash \*\)|Bash\(bash:' )" "allowed-tools too wide"
+  t_eq "" "$(printf '%s' "$line" | sed 's/^allowed-tools:[[:space:]]*//' | grep -E '(^|,)[[:space:]]*Bash[[:space:]]*(,|$)')" "bare Bash"
+  t_eq 1 "$(printf '%s' "$line" | grep -o 'Bash(' | wc -l | tr -d ' ')" "exactly one Bash rule"
+}
+
 t_main "$@"

@@ -1,10 +1,12 @@
 // aionas-savings mod (Claude Code 2.1.299 function hooks). Owners: AIO-855, AIO-859.
 //
-// - The band above the prompt (terminal and desktop): how many savings
-//   methods are on, a self-override button ("Bypass…", 1 hour), and
-//   "Compact recommended" once the context passes the handoff threshold. The
-//   compact button only runs /compact when pressed: never automatically. No
-//   thumbs up/down in this wave (W24-5).
+// - The aionas mod band above the prompt (terminal and desktop; VS Code draws
+//   no mod in 2.1.299), drawn by hooks/band.tsx per the wave-24 mod spec: one
+//   line by default with More (M1), per-method chips whose one click bypasses
+//   that method for 1 hour or ends my bypass (M3), the effort chip with the
+//   xhigh window's countdown, and the warning row with /compact above
+//   compact_at. /compact runs only when pressed: never automatically. No
+//   thumbs up/down and no "pause all" in this wave (W24-5, M3).
 // - The slash commands /aionas-bypass and /aionas-xhigh, answered here without
 //   a model turn; the work is done by commands/*.sh, run by argument vector
 //   (no shell), so nothing the person types is ever parsed by a shell.
@@ -16,35 +18,17 @@
 // - The "write the minimum" skill expands to a no-op when the method is off.
 //
 // Privacy (W24-4): nothing here sends anything; the scripts send only method
-// ids, durations, closed-set params and a reason the person typed.
+// ids, durations, closed-set params and a reason the person typed. The band
+// reads its facts through `aionas-bypass.sh --band` (numbers and names) and
+// the context size from session.measure; it never calls $.http.fetch or
+// $.session.messages, nor reads ~/.claude/projects or the alias credential.
 import type { EngineInterface, Register } from 'claude-code'
+import { drawBand, isWindowOpen, parseBand, routeOf } from './band.tsx'
+import type { Action, Facts } from './band.tsx'
 
 type Grant = 'high' | 'xhigh' | 'max' | 'free'
 type Level = 'xhigh' | 'max'
-type Row = { method: string; state: string; isActive: boolean; isSelfOverride: boolean }
 type Ran = { code: number; out: string }
-
-const LABELS: Record<string, string> = {
-  handoff: 'handoff document',
-  effort_default: 'high effort default',
-  subagent_sonnet: 'Sonnet for sub-agents',
-  unused_services: 'unused services off',
-  noisy_guard: 'noisy-command guard',
-  output_store: 'long-output store',
-  write_minimum: 'write the minimum',
-}
-
-export const parseRows = (out: string): { rows: Row[]; compactAt: number } => {
-  const rows: Row[] = []
-  let compactAt = 200000
-  for (const line of out.split('\n')) {
-    const [name = '', state = '', active, selfOverride, extra] = line.split('\t')
-    if (name === 'compact_at' && /^[0-9]+$/.test(state)) compactAt = Number(state)
-    else if (name in LABELS && selfOverride !== undefined && extra === undefined)
-      rows.push({ method: name, state, isActive: active === '1', isSelfOverride: selfOverride === '1' })
-  }
-  return { rows, compactAt }
-}
 
 export const parseGrant = (out: string): Grant => {
   const g = out.trim()
@@ -80,12 +64,16 @@ const st = {
   grant: Promise.resolve<Grant>('high'),
   chosen: undefined as Level | undefined,
   baseExtra: undefined as string | undefined,
-  rows: [] as Row[],
-  compactAt: 200000,
-  contextTokens: 0,
-  isHidden: false,
-  isPicking: false,
+  baseUrl: undefined as string | undefined,
+  facts: undefined as Facts | undefined,
   listed: Promise.resolve(),
+  refreshing: undefined as Promise<void> | undefined,
+  isFull: false,
+  contextTokens: 0,
+  contextWindow: 0,
+  laterAt: 0,
+  tick: undefined as { cancel: () => void } | undefined,
+  countdown: undefined as { cancel: () => void } | undefined,
 }
 
 function script(root: string, path: string): string {
@@ -105,13 +93,27 @@ async function bypass($: EngineInterface, args: string[]): Promise<Ran> {
   return run($, [script($.plugin.root, 'commands/aionas-bypass.sh'), ...args])
 }
 
-async function refresh($: EngineInterface): Promise<void> {
-  const r = await bypass($, ['--list'])
-  if (r.code !== 0) return
-  const parsed = parseRows(r.out)
-  st.rows = parsed.rows
-  st.compactAt = parsed.compactAt
-  $.ui.invalidate('ui.render')
+// The band's facts, read again (§6): at session start, every 30 s, after a
+// press and after each main-loop turn. One read at a time. While an xhigh
+// window is open a 15 s timer keeps its countdown moving; it stops with it.
+function refresh($: EngineInterface): Promise<void> {
+  if (st.refreshing !== undefined) return st.refreshing
+  const p = (async () => {
+    const r = await bypass($, ['--band'])
+    if (r.code !== 0 || r.out === '') return
+    st.facts = parseBand(r.out)
+    const isOpen = isWindowOpen(st.facts)
+    if (isOpen && st.countdown === undefined) st.countdown = $.clock.every(15_000, () => void refresh($))
+    if (!isOpen && st.countdown !== undefined) {
+      st.countdown.cancel()
+      st.countdown = undefined
+    }
+    $.ui.invalidate('ui.render')
+  })().finally(() => {
+    st.refreshing = undefined
+  })
+  st.refreshing = p
+  return p
 }
 
 async function readGrant($: EngineInterface): Promise<Grant> {
@@ -121,27 +123,21 @@ async function readGrant($: EngineInterface): Promise<Grant> {
   return g
 }
 
-async function pickBypass($: EngineInterface, value: string): Promise<void> {
-  st.isPicking = false
-  if (value !== '-') {
-    const r = await bypass($, [value, '1h'])
-    $.ui.toast(r.out || 'aionas-bypass could not run.')
-    await refresh($)
-  }
-  $.ui.invalidate('ui.render')
+async function press($: EngineInterface, a: Action): Promise<void> {
+  const r =
+    a.kind === 'xhigh'
+      ? await run($, [script($.plugin.root, 'commands/aionas-xhigh.sh')])
+      : await bypass($, a.kind === 'end' ? ['--end', a.method] : [a.method, '1h'])
+  $.ui.toast(r.out || 'aionas could not run (bash was not found).')
+  await refresh($)
 }
 
 async function compactNow($: EngineInterface): Promise<void> {
   await $.command.run({ command: 'compact' })
 }
 
-function showPicker($: EngineInterface): void {
-  st.isPicking = true
-  $.ui.invalidate('ui.render')
-}
-
-function hideBand($: EngineInterface): void {
-  st.isHidden = true
+function redraw($: EngineInterface, change: () => void): void {
+  change()
   $.ui.invalidate('ui.render')
 }
 
@@ -161,10 +157,15 @@ export const register: Register = on => {
     // Windows: Claude Code's own Git Bash, never whatever "bash" PATH finds (WSL).
     st.bash = (await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')) ?? 'bash'
     st.baseExtra = await $.env.get('CLAUDE_CODE_EXTRA_BODY')
+    st.baseUrl = await $.env.get('ANTHROPIC_BASE_URL')
     // Not awaited: the session never waits on a process; a request waits only
     // in the rare case it is sent before the grant is read.
     st.grant = readGrant($)
     st.listed = refresh($)
+    st.tick?.cancel()
+    st.tick = undefined
+    // The 30 s refresh only where a band is drawn (an interactive session).
+    if (e.isInteractive) st.tick = $.clock.every(30_000, () => void refresh($))
     return next(e)
   })
 
@@ -211,7 +212,7 @@ export const register: Register = on => {
 
   on('skill.prompt', async ($, e, next) => {
     if (e.pluginName !== 'aionas-savings' || !e.skill.endsWith('write-minimum')) return next(e)
-    const row = st.rows.find(r => r.method === 'write_minimum')
+    const row = st.facts?.methods.find(m => m.id === 'write_minimum')
     if (row !== undefined && !row.isActive) {
       void bypass($, ['--count', 'write_minimum', 'skipped'])
       return { text: 'The Aionas "write the minimum" method is off for you right now. Ignore this skill and work as usual.' }
@@ -222,76 +223,52 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined) {
-      try {
-        const u = await $.session.usage()
-        const t = u.context.tokens ?? 0
-        if (t >= st.compactAt !== st.contextTokens >= st.compactAt) $.ui.invalidate('ui.render')
-        st.contextTokens = t
-      } catch {
-        // no usage reading: the band keeps its last
-      }
-    }
+    if (e.agentId === undefined) void refresh($)
     return done
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (st.rows.length === 0) await st.listed
-    if (e.props.hasSurvey || st.isHidden || st.rows.length === 0) return next(e)
-    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    const { Box, Text, Button, Select } = $.ui.resolve(e)
-    const onCount = st.rows.filter(r => r.isActive).length
-    const isOverCompact = st.contextTokens >= st.compactAt
-    const choices = st.rows.filter(r => r.isActive)
-
-    if (st.isPicking && choices.length > 0) {
-      return (
-        <Box key="aionas-pick" flexDirection="row">
-          <Select
-            key="aionas-bypass-method"
-            label="Bypass for 1 hour: "
-            autoFocus
-            options={[
-              ...choices.map(r => ({
-                value: r.method,
-                label: `${LABELS[r.method]}${r.isSelfOverride ? '' : ' (asks approval)'}`,
-              })),
-              { value: '-', label: 'cancel' },
-            ]}
-            onSelect={(value: string) => void pickBypass($, value)}
-          />
-        </Box>
-      )
+  // The live context, pushed by the engine (§4.3): the warning row and the
+  // handoff chip's size. Redraw only when what the band shows moves.
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('context')) {
+      const t = e.context.tokens ?? 0
+      const shown = (n: number) => Math.round(n / 1000)
+      const isChanged = shown(t) !== shown(st.contextTokens) || e.context.window !== st.contextWindow
+      st.contextTokens = t
+      st.contextWindow = e.context.window
+      if (isChanged) $.ui.invalidate('ui.render')
     }
+    return next(e)
+  })
 
-    return (
-      <Box key="aionas-band" flexDirection="row">
-        <Text dimColor>
-          Aionas savings: {onCount} of {st.rows.length} on{' '}
-        </Text>
-        {choices.length > 0 && (
-          <Button
-            key="aionas-bypass"
-            label="Bypass…"
-            dimColor
-            onPress={() => showPicker($)}
-          />
-        )}
-        {isOverCompact && (
-          <Button
-            key="aionas-compact"
-            label="Compact recommended"
-            variant="primary"
-            onPress={() => void compactNow($)}
-          />
-        )}
-        <Button
-          key="aionas-hide"
-          label="Hide"
-          dimColor
-          onPress={() => hideBand($)}
-        />
-      </Box>
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    if (st.facts === undefined) await st.listed
+    const facts = st.facts
+    if (facts === undefined || facts.methods.length === 0) return next(e)
+    return drawBand(
+      $,
+      e,
+      {
+        facts,
+        route: routeOf(st.baseUrl, facts.gatewayHost),
+        isFull: st.isFull,
+        isWorking: e.props.isWorking,
+        columns: e.props.bodyColumns,
+        sessionLevel: st.chosen,
+        contextTokens: st.contextTokens,
+        contextWindow: st.contextWindow,
+        laterAt: st.laterAt,
+      },
+      {
+        chip: a => void press($, a),
+        more: () => redraw($, () => (st.isFull = true)),
+        less: () => redraw($, () => (st.isFull = false)),
+        xhigh: () => void press($, { kind: 'xhigh', method: 'effort_default' }),
+        compact: () => void compactNow($),
+        later: () => redraw($, () => (st.laterAt = st.contextTokens + 50_000)),
+      },
     )
   })
 }

@@ -10,8 +10,23 @@
 #       command sends a request (status requested) and prints "sent for
 #       approval". The reason is optional (at most 280 characters). Required
 #       methods cannot be bypassed.
-#   aionas-bypass.sh --list      the band's rows: method state active self_override
-#                                (client methods only), then compact_at <tokens>
+#   aionas-bypass.sh --band      the aionas mod band's facts (mod spec §5), tab
+#                                separated, numbers and names only, no network:
+#       clock <now> <utc offset seconds>
+#       me <display_name> <org_name> <role> <lead_name|-> <computer_name|->
+#       savings <usd|api_value> <today_usd|-> <since_on_usd|-> <today_tokens> <since_on_tokens> <since_on_date|-> <as_of_epoch|0>
+#       method <id> <on|off> <active> <self_override> <released> <bypass_until|0> <request_pending> <fired_today>
+#       window <xhigh|max|-> <until|0> <session_grant|->
+#       compact_at <tokens> <idle_minutes>
+#       gateway_host <host|->
+#                                me and savings come from the last policy answer
+#                                and are left out when it has no such block.
+#   aionas-bypass.sh --end <method>
+#                                end my bypass of <method> on this computer at
+#                                once (the band's chip), with no network call and
+#                                no counter: the server row keeps its own end.
+#   aionas-bypass.sh --list      the older band rows: method state active
+#                                self_override, then compact_at <tokens>
 #   aionas-bypass.sh --count METHOD COUNTER
 #                                add one to a counter (the mod's counting)
 #
@@ -39,6 +54,29 @@ if [ "${1:-}" = --list ]; then
   aionas_is_uint "$t" || t=200000
   printf 'compact_at\t%s\n' "$t"
   exit 0
+fi
+
+if [ "${1:-}" = --band ]; then
+  aionas_band "$SID"
+  exit 0
+fi
+
+if [ "${1:-}" = --end ]; then
+  method=$(aionas_cmd_method "${2:-}") || {
+    echo "Usage: /aionas-bypass --end <method>. Methods: $CLIENT_METHODS."
+    exit 2
+  }
+  if aionas_is_required "$method"; then
+    echo "$method is required by your organization and is never bypassed."
+    exit 1
+  fi
+  aionas_bypass_end "$method"
+  case $? in
+    0) echo "$method is back on for you on this computer, from now (new and running sessions)."; exit 0 ;;
+    1) echo "$method was not bypassed on this computer. It stays on."; exit 0 ;;
+  esac
+  echo "Could not end the bypass of $method."
+  exit 1
 fi
 
 if [ "${1:-}" = --count ]; then
@@ -84,6 +122,7 @@ code=$1 status=$2
 if [ $rc -eq 0 ]; then
   rm -f "$body"
   if [ "$status" = requested ]; then
+    aionas_request_add "$method" >/dev/null 2>&1
     echo "$method: sent for approval to your org admin or lead.$why It applies from your next session once approved."
     exit 0
   fi
@@ -129,6 +168,7 @@ if [ $allowed -eq 1 ]; then
   exit 0
 fi
 if [ $queued -eq 1 ]; then
+  aionas_request_add "$method" >/dev/null 2>&1
   echo "$method: your organization asks for approval. Aionas could not be reached; the request is sent for approval at your next session start."
   exit 0
 fi

@@ -1,0 +1,34 @@
+                                                                                                                                                             ╭─────────────────────────────────────────╮
+ ▐▛███▛█   Claude Code v2.1.299                                                                                                                              │ aionas-savings                          │
+▝▜██████▀  Opus 5.5 · API Usage Billing                                                                                                                      │ noisy_guard is back on for you on this  │
+ ▝▝   ▝▝   /private/var/folders/cs/g7swkghd3bs9k2rqy_3ns_sr0000gn/T/aionas-band-e2e.fr94nrp4/work                                                            │ computer, from now (new and running     │
+                                                                                                                                                             │ sessions).                              │
+▎ Auto mode is now Claude Code's default permission mode.                                                                                                    ╰─────────────────────────────────────────╯
+▎ Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and
+▎ blocks the rest.
+▎ https://code.claude.com/docs/en/permission-modes
+
+❯ fix the retry loop
+
+⏺ Done: the retry loop now backs off.
+
+✻ Cooked for 0s · done 11:14 PM
+
+
+
+
+
+
+
+
+
+
+
+
+aionas │ Noa Levi · Acme · mbp-noa · gateway │ saved today ~$3.80 est. │ [ ● high ] [ ● sonnet subagents ] [ ● guard ] [ ● store ] [ ● handoff ] [ ● unused off ] [ ● write-min ] [ More ]          [-]
+▲ Context 214K of 1M. Compact recommended. Idle 55 min → a handoff doc is written. [ /compact ] [ Later ]
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

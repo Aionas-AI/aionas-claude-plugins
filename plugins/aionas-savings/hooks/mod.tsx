@@ -163,7 +163,9 @@ export const register: Register = on => {
     st.grant = readGrant($)
     st.listed = refresh($)
     st.tick?.cancel()
-    st.tick = $.clock.every(30_000, () => void refresh($))
+    st.tick = undefined
+    // The 30 s refresh only where a band is drawn (an interactive session).
+    if (e.isInteractive) st.tick = $.clock.every(30_000, () => void refresh($))
     return next(e)
   })
 

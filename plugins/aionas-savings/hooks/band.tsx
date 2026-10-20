@@ -203,10 +203,16 @@ export const chipsOf = (
     return chip(`● ${base}${extra}`, 'on', m.id === 'effort_default' ? 'xhigh' : 'bypass')
   })
 
-export const savedLine = (s: Savings): string =>
+// "saved today <amount><tail>": the amount drawn strong, the rest plain/dim.
+export const savedParts = (s: Savings): { amount: string; tail: string } =>
   s.kind === 'api_value'
-    ? `saved today ${fmtTokens(s.todayTokens)} tokens (${fmtUsd(s.todayUsd, '≈ ')} API value, est.)`
-    : `saved today ${fmtUsd(s.todayUsd)} est.`
+    ? { amount: `${fmtTokens(s.todayTokens)} tokens`, tail: ` (${fmtUsd(s.todayUsd, '≈ ')} API value, est.)` }
+    : { amount: fmtUsd(s.todayUsd), tail: ' est.' }
+
+export const savedLine = (s: Savings): string => {
+  const p = savedParts(s)
+  return `saved today ${p.amount}${p.tail}`
+}
 
 export const sinceDays = (s: Savings, now: number, tzOffset: number): number | undefined => {
   const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(s.sinceDate)
@@ -328,8 +334,14 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
           <Text dimColor> │ </Text>
           {f.me === undefined ? <Text dimColor>{line.who}</Text> : <Text>{f.me.name}</Text>}
           {f.me !== undefined && line.who !== f.me.name && <Text dimColor>{line.who.slice(f.me.name.length)}</Text>}
-          {line.saved !== undefined && <Text dimColor> │ </Text>}
-          {line.saved !== undefined && <Text>{line.saved}</Text>}
+          {f.savings !== undefined && <Text dimColor> │ </Text>}
+          {f.savings !== undefined && <Text>saved today </Text>}
+          {f.savings !== undefined && (
+            <Text color="success" weight="bold">
+              {savedParts(f.savings).amount}
+            </Text>
+          )}
+          {f.savings !== undefined && <Text dimColor>{savedParts(f.savings).tail}</Text>}
           <Text dimColor> │</Text>
         </Text>
         {line.chips.map(chipEl)}

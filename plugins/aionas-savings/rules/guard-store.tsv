@@ -1,0 +1,40 @@
+# aionas-savings: the noisy-command guard rules and the long-output store
+# settings (AIO-860). Versioned: bump "version" on every change.
+#
+# Fields are separated by ONE tab. Lines starting with "#" are comments.
+#
+#   setting <TAB> name <TAB> value
+#   rule <TAB> id <TAB> kind <TAB> match <TAB> skip <TAB> insert
+#
+# A rule applies only to a simple command: one program, no | ; & < > ` $(
+# and no newline. Leading NAME=value words are kept in front of it.
+#   match   POSIX ERE on the command after those words. It must match at the
+#           start and end at a word boundary; the flags are inserted there.
+#   skip    POSIX ERE tried on the rest of the command plus one space; when
+#           it matches, the command is already quiet and nothing changes.
+#           "-" means never.
+#   insert  the flags of the quiet form, or "-" for none.
+#   kind    quiet: the command is rewritten to the quiet form. A failing run
+#                  shows everything the quiet form prints.
+#           cap:   the command is not changed. A run that succeeds with more
+#                  than cap_tokens of output is cut to whole lines within
+#                  cap_tokens, ending with "[aionas-guard: capped <id> ..."
+#                  (the post-tool hook does it); a failing run keeps its
+#                  full output.
+# Every rewrite starts with "AIONAS_GUARD=<id> ". AIONAS_FULL=1 in front of
+# a command skips the guard and the store (counted as a bypass).
+# No backslashes in match or skip: awk reads them as dynamic regexps.
+version	1
+setting	min_claude_code	2.1.299
+setting	cap_tokens	1500
+setting	store_tokens	2000
+setting	store_head	40
+setting	store_tail	40
+setting	keep_lines_max	40
+setting	bytes_per_token	4
+rule	pytest	quiet	^(python3? -m )?pytest	 (-q+|--quiet|-v+|--verbose)( |=)	-q
+rule	npm_install	quiet	^npm (install|i|ci|add)	 (-s|--silent|-q|--quiet|-d+|--verbose|--loglevel|--no-progress)( |=)	--no-audit --no-fund --no-progress
+rule	git_log	quiet	^git log	 (-n|-n ?[0-9]+|-[0-9]+|--max-count|--oneline|--format|--pretty|-p|--patch|--stat|--name-only|--name-status|-L|--since|--after|--until|--before|--graph)( |=)	-n 30 --oneline
+rule	cat_cap	cap	^cat	-	-
+rule	grep_cap	cap	^(grep|egrep|fgrep|rg)	-	-
+rule	sed_cap	cap	^sed	 (-i|--in-place)( |=)	-

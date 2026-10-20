@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# aionas-recall: read back a long tool output the aionas-savings store kept on
+# this computer (AIO-860). Claude Code puts the plugin's bin/ on PATH.
+#
+#   aionas-recall out_<12 hex>                  the whole output
+#   aionas-recall out_<12 hex> --grep PATTERN   only matching lines, as N:line
+#                                               (PATTERN is an extended regexp)
+#   aionas-recall out_<12 hex> --lines A-B      lines A to B, as N:line
+#   aionas-recall --status                      "store active" or "store inactive"
+#
+# Exit 0 on output, 1 when nothing matched or the id is not kept (any more),
+# 2 on a usage error. Reads only; sends nothing.
+here=$(cd "$(dirname "$0")" && pwd)
+AIONAS_PLUGIN_ROOT=${AIONAS_PLUGIN_ROOT:-$(dirname "$here")}
+AIONAS_LIB=${AIONAS_LIB:-$AIONAS_PLUGIN_ROOT/lib}
+. "$AIONAS_LIB/aionas.sh" || exit 2
+. "$AIONAS_PLUGIN_ROOT/hooks/pretool-guard.lib" || exit 2
+
+usage() {
+  echo "usage: aionas-recall out_<12 hex> [--grep PATTERN | --lines A-B] | --status" >&2
+  exit 2
+}
+
+case "${1:-}" in
+  --status)
+    aionas_gs_status_text
+    echo "rules version $(aionas_gs_rules_version)"
+    exit 0
+    ;;
+  -h | --help) usage ;;
+  out_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) id=$1 ;;
+  *) usage ;;
+esac
+[ ${#id} -eq 16 ] || usage
+f="$(aionas_gs_store_dir)/$id.txt"
+if [ ! -f "$f" ]; then
+  echo "aionas-recall: $id is not kept on this computer (outputs are kept $(aionas_gs_retention_days) days). Rerun the command with AIONAS_FULL=1." >&2
+  exit 1
+fi
+shift
+case "${1:-}" in
+  "") cat "$f" ;;
+  --grep)
+    [ $# -eq 2 ] && [ -n "$2" ] || usage
+    grep -n -E -e "$2" "$f"
+    ;;
+  --lines)
+    [ $# -eq 2 ] || usage
+    case "$2" in
+      [0-9]*-[0-9]*) a=${2%%-*}; b=${2#*-} ;;
+      *) usage ;;
+    esac
+    aionas_is_uint "$a" && aionas_is_uint "$b" || usage
+    awk -v a="$a" -v b="$b" 'NR >= a && NR <= b { print NR ":" $0; f = 1 } NR > b { exit } END { exit f ? 0 : 1 }' "$f"
+    ;;
+  *) usage ;;
+esac

@@ -28,6 +28,11 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services.sh\"",
             "async": true,
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services-notice.sh\"",
+            "timeout": 5
           }
         ]
       }

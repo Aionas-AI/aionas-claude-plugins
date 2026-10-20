@@ -13,6 +13,15 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
 
+**Install by hand** (the same two steps the one install does, in a Claude Code session):
+
+```
+/plugin marketplace add Aionas-AI/aionas-claude-plugins
+/plugin install aionas-savings@aionas
+```
+
+The plugin takes effect from the next session. Releases are git tags (`aionas-savings-vX.Y.Z`); with auto-update on, Claude Code follows the marketplace.
+
 **Privacy.** Only numbers and names leave the computer. The hourly counters send a method, a counter name and a count. The policy sync only downloads. Prompts, model replies, tool output and command arguments are never sent.
 
 ### Layout
@@ -35,13 +44,16 @@ tests/                                   make test
 | SessionStart | `daily-scan.sh` | async | AIO‑854 |
 | SessionStart | `effort-window.sh` | async | AIO‑859 |
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
+| SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |
 | UserPromptSubmit | `handoff-cancel.sh` | 5 s | AIO‑858 |
 | PreToolUse (Bash) | `noisy-guard.sh` | 10 s | AIO‑860 |
 | PostToolUse | `output-store.sh` | 30 s | AIO‑860 |
 | Stop | `handoff-arm.sh` | asyncRewake | AIO‑858 |
 | Stop | `counters-flush.sh` | async | AIO‑855 |
 
-Every command has the form `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"`. Claude Code runs it with bash on macOS and Linux, and with Git Bash on Windows. A script must exit 0 and print nothing unless it has something to tell Claude Code. SessionStart scripts never block the session.
+Every command has the form `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"`. Claude Code runs it with bash on macOS and Linux, and with Git Bash on Windows. A script must exit 0 and print nothing unless it has something to tell Claude Code. SessionStart scripts never block the session: every one is async, except `unused-services-notice.sh`. It only reads a local file (no network), and prints the one-line "Aionas turned off services with no calls in N days: …" notice once, the session after the daily run turned something off. Without it the notice would never show, because an async hook's output is not shown.
+
+Shell scripts must keep LF line endings, or bash fails on a Windows clone with `core.autocrlf`. `.gitattributes` forces LF on `*.sh`, `*.awk`, `*.lib` and the other files a hook reads (only `*.cmd` is CRLF).
 
 ### The shared library (`lib/`)
 
@@ -74,7 +86,8 @@ Source it from a hook with `. "$(dirname "$0")/../lib/aionas.sh"`. It is POSIX s
 
 ```
 make test       # unit tests; temporary HOME only, no network (a fake curl)
-make validate   # Claude Code 2.1.299's own manifest check, in a temporary config dir
+make validate   # Claude Code 2.1.299's own checks in a temporary config dir:
+                # plugin validate (marketplace and plugin) and plugin test (the mod)
 ```
 
 A lane adds its tests as `tests/**/<name>.test.sh`, using `tests/lib/harness.sh`. Each test runs in a fresh temporary HOME. Temporary folders are made with `mktemp` and are never deleted recursively.

@@ -1,0 +1,14 @@
+# A Windows clone with core.autocrlf=true must not turn a hook script into CRLF:
+# bash then fails on "\r" (bad interpreter, "command not found"). Everything
+# bash reads, or that a hook parses, is checked out with LF on every OS.
+*.sh        text eol=lf
+*.awk       text eol=lf
+*.lib       text eol=lf
+*.tsv       text eol=lf
+*.json      text eol=lf
+*.tsx       text eol=lf
+*.md        text eol=lf
+Makefile    text eol=lf
+plugins/aionas-savings/bin/aionas-recall text eol=lf
+# cmd.exe wants CRLF
+*.cmd       text eol=crlf

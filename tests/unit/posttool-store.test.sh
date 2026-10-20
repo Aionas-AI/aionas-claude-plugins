@@ -274,4 +274,32 @@ test_only_counts_reach_the_server() {
   for n in SECRET hunter2 deploy secrets.env build line; do t_lacks "$all" "$n" "content sent"; done
 }
 
+# shipped EVENT: the decoded command hooks/hooks.json registers for EVENT
+# (PreToolUse: its Bash matcher), the way Claude Code runs the plugin.
+shipped() {
+  aionas_json_flatten "$T_PLUGIN/hooks/hooks.json" | awk -F '\t' -v ev="$1" '
+    $1 ~ ("^hooks\\." ev "\\.[0-9]+\\.matcher$") { m[substr($1, 1, length($1) - 8)] = $3 }
+    $1 ~ ("^hooks\\." ev "\\.[0-9]+\\.hooks\\.[0-9]+\\.command$") { c[++n] = $1; v[$1] = $3 }
+    END { for (i = 1; i <= n; i++) { g = c[i]; sub(/\.hooks\.[0-9]+\.command$/, "", g)
+          if (ev != "PreToolUse" || m[g] == "Bash") { print v[c[i]]; exit } } }' | aionas_json_unescape
+}
+
+test_shipped_hooks_json_reaches_the_real_guard_and_store() {
+  setup
+  export CLAUDE_PLUGIN_ROOT="$T_PLUGIN"
+  local pre_cmd post_cmd out id
+  pre_cmd=$(shipped PreToolUse); post_cmd=$(shipped PostToolUse)
+  t_contains "$pre_cmd" '/hooks/' "no PreToolUse Bash command"
+  t_contains "$post_cmd" '/hooks/' "no PostToolUse command"
+  # The guard: git log becomes its quiet form.
+  out=$(printf '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git log"},"tool_use_id":"t1"}' | bash -c "$pre_cmd")
+  t_eq "AIONAS_GUARD=git_log git log -n 30 --oneline" "$(aionas_json_flatten <<<"$out" | aionas_json_get hookSpecificOutput.updatedInput.command | aionas_json_unescape)"
+  # The store: a long output becomes head + tail + the fixed marker.
+  gen 300 >"$HOME/o.txt"
+  id="out_$(sha12 "$HOME/o.txt")"
+  out=$(printf '{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"./build.sh"},"tool_response":{"stdout":%s,"stderr":"","interrupted":false,"isImage":false},"tool_use_id":"t1"}' \
+    "$(aionas_json_escape "$(cat "$HOME/o.txt")")" | bash -c "$post_cmd")
+  t_eq "$(store_marker 300 "$id")" "$(view "$out" | tail -n 1)"
+}
+
 t_main "$@"

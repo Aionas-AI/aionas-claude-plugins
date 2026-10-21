@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # aionas-savings hook: stop-handoff (Stop, asyncRewake). Owner: AIO-858.
 #
-# After each turn: read the context size from the transcript's last usage
-# numbers. At or above the threshold (policy param threshold_tokens, default
+# After each turn: read the context size from the usage numbers of this turn's
+# answer in the transcript (the Stop input has no size; the answer may land a
+# moment after this hook starts, so it waits for it). At or above the threshold (policy param threshold_tokens, default
 # 200000) with nothing running, this process stays alive as the idle timer.
 # After idle_minutes (default 55) with no new prompt and no sub-agent activity
 # it exits 2 with the handoff instruction: Claude Code wakes the SAME session
@@ -11,7 +12,8 @@
 #
 # Reads only numbers from the transcript; never prints or sends content.
 # Test seams: AIONAS_HANDOFF_IDLE_SECONDS, AIONAS_HANDOFF_POLL_SECONDS (default 20),
-# AIONAS_HANDOFF_BUSY_SECONDS (a sub-agent written this recently is running; default 180).
+# AIONAS_HANDOFF_BUSY_SECONDS (a sub-agent written this recently is running; default 180),
+# AIONAS_HANDOFF_SETTLE_SECONDS (longest wait for this turn's answer; default 15).
 . "$(dirname "$0")/handoff-wake.sh"
 
 _in=$(cat 2>/dev/null)
@@ -20,6 +22,8 @@ _sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
 _aionas_sid_ok "$_sid" || exit 0
 _tr=$(printf '%s\n' "$_flat" | aionas_json_get transcript_path)
 _cwd=$(printf '%s\n' "$_flat" | aionas_json_get cwd)
+_pid=$(printf '%s\n' "$_flat" | aionas_json_get prompt_id)
+_aionas_sid_ok "$_pid" || _pid=''
 
 # Policy: off or released -> nothing; bypassed on this computer -> count once.
 if [ "$(aionas_policy_state handoff "$_sid")" != on ]; then
@@ -49,9 +53,11 @@ _poll=${AIONAS_HANDOFF_POLL_SECONDS:-20}
 aionas_is_uint "$_poll" && [ "$_poll" -ge 1 ] || _poll=20
 _busy=${AIONAS_HANDOFF_BUSY_SECONDS:-180}
 aionas_is_uint "$_busy" || _busy=180
+_settle=${AIONAS_HANDOFF_SETTLE_SECONDS:-15}
+aionas_is_uint "$_settle" || _settle=15
 
-# Context size: below the threshold ends any older timer.
-_tok=$(aionas_handoff_context_tokens "$_tr") || { aionas_handoff_disarm "$_sid" >/dev/null; exit 0; }
+# Context size of this turn's answer: below the threshold ends any older timer.
+_tok=$(aionas_handoff_wait_tokens "$_tr" "$_pid" "$_settle") || { aionas_handoff_disarm "$_sid" >/dev/null; exit 0; }
 if [ "$_tok" -lt "$_th" ]; then
   aionas_handoff_disarm "$_sid" >/dev/null
   exit 0

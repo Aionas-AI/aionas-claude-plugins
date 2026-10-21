@@ -269,7 +269,7 @@ test_only_counts_reach_the_server() {
   body=$(t_call 1 body)
   t_eq "https://gw.example.test/enroll/v1/savings/counters" "$(t_call 1 url)"
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"(noisy_guard|output_store)","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.1.0","counters":[,,,]}' "$rest"
+  t_eq '{"plugin_version":"0.1.1","counters":[,,,]}' "$rest"
   all=$(cat "$FAKE_CURL_LOG"/*/* 2>/dev/null)
   for n in SECRET hunter2 deploy secrets.env build line; do t_lacks "$all" "$n" "content sent"; done
 }

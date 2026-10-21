@@ -21,8 +21,10 @@
 #      settings at once (hot reload).
 # So the window never touches settings.json: writing maxEffortLevel=max would
 # raise every open session, and restoring high would clamp the window's own
-# sessions. Instead the settings stay at effortLevel=high, maxEffortLevel=high,
-# and the mod gives a granted session its level per request through
+# sessions. Instead the settings stay at effortLevel=high, maxEffortLevel=high
+# and env CLAUDE_CODE_EFFORT_LEVEL=high (the install's start-at-high pin: on
+# 2.1.299 effortLevel alone loses to a per-model /effort entry), and the mod
+# gives a granted session its level per request through
 # CLAUDE_CODE_EXTRA_BODY ({"output_config":{"effort":...}}), which Claude Code
 # documents as not clamped by maxEffortLevel. "Restores high after expiry" is
 # therefore this hook dropping the ended window: new sessions are high again.

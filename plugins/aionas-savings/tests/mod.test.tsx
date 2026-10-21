@@ -476,6 +476,37 @@ describe('effort grant', () => {
     expect(engineEffort).toBe(1)
   })
 
+  test('under the install pin CLAUDE_CODE_EFFORT_LEVEL=high, /effort moves the pin for this session and goes to Claude Code', async ($, on) => {
+    const w = world(on, 'high')
+    w.env.set('CLAUDE_CODE_EFFORT_LEVEL', 'high')
+    const engine: string[] = []
+    on('command.run', { command: 'effort' }, ($, e) => {
+      engine.push(`${e.args}:${w.env.get('CLAUDE_CODE_EFFORT_LEVEL')}`)
+      return { text: 'ok' }
+    })
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await $.command.run({ command: 'effort', args: 'low' } as never)
+    await $.command.run({ command: 'effort', args: 'xhigh' } as never)
+    await $.command.run({ command: 'effort', args: 'nonsense' } as never)
+    await $.command.run({ command: 'effort', args: 'auto' } as never)
+    // Claude Code sees the pin equal to the pick (xhigh is then clamped by
+    // maxEffortLevel); auto lifts the pin; an unknown word changes nothing.
+    expect(engine).toEqual(['low:low', 'xhigh:xhigh', 'nonsense:xhigh', 'auto:undefined'])
+    expect(w.envSets).toEqual(['low', 'xhigh', undefined])
+  })
+
+  test('without the pin, /effort never sets CLAUDE_CODE_EFFORT_LEVEL; a granted session keeps the pin as it is', async ($, on) => {
+    const w = world(on, 'xhigh')
+    on('command.run', { command: 'effort' }, () => ({ text: 'ok' }))
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await $.command.run({ command: 'effort', args: 'low' } as never)
+    expect(w.envSets).toEqual([])
+    w.env.set('CLAUDE_CODE_EFFORT_LEVEL', 'high')
+    const r = await $.command.run({ command: 'effort', args: 'max' } as never)
+    expect(r.text).toContain('Set effort level to max')
+    expect(w.envSets).toEqual([])
+  })
+
   test('a session opened in an xhigh window sends xhigh, then max after /effort max, and puts the env back', async ($, on) => {
     const w = world(on, 'xhigh')
     const seen: (string | undefined)[] = []

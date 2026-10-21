@@ -14,7 +14,9 @@
 //   (or while effort_default is off for the person) gets its level per main-
 //   loop request through CLAUDE_CODE_EXTRA_BODY, set just before the request
 //   and put back right after it, so tools and subagents never inherit it.
-//   Every other session is left to the settings cap (maxEffortLevel=high).
+//   Every other session is left to the settings cap (maxEffortLevel=high)
+//   and the install's start-at-high pin (CLAUDE_CODE_EFFORT_LEVEL=high),
+//   which /effort moves for the session it is typed in.
 // - The "write the minimum" skill expands to a no-op when the method is off.
 //
 // Privacy (W24-4): nothing here sends anything; the scripts send only method
@@ -54,6 +56,9 @@ export const withEffort = (base: string | undefined, level: Level): string | und
 }
 
 export const splitArgs = (args: string): string[] => args.trim().split(/\s+/).filter(a => a !== '')
+
+// The /effort arguments that name a level (Claude Code 2.1.299).
+const EFFORT_ARGS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto']
 
 // The session's state. Module variables: a reload (a new module) starts them
 // over, and session.start (which a reload fires again) reads them back from
@@ -187,15 +192,25 @@ export const register: Register = on => {
 
   // /effort inside a granted session: xhigh and max are this session's to
   // pick; the settings cap answers everywhere else.
+  //
+  // The install pins CLAUDE_CODE_EFFORT_LEVEL=high (settings env) so every
+  // session starts at high whatever the model (Claude Code 2.1.299 keeps
+  // effortLevel only as a legacy default under a per-model /effort entry).
+  // Claude Code would refuse any /effort under that pin ("overrides this
+  // session"), so a level the person picks becomes this session's pin first
+  // (auto lifts it): /effort keeps working, maxEffortLevel still clamps it,
+  // and the next session starts at high again.
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const g = await st.grant
-    if (g === 'high') return next(e)
     const level = (splitArgs(e.args)[0] ?? '').toLowerCase()
-    if (level === 'xhigh' || level === 'max') {
+    if (g !== 'high' && (level === 'xhigh' || level === 'max')) {
       st.chosen = level
       return { text: `Set effort level to ${level} (this session only; opened in an Aionas window).` }
     }
-    if (['low', 'medium', 'high', 'auto'].includes(level)) st.chosen = undefined
+    if (g !== 'high' && ['low', 'medium', 'high', 'auto'].includes(level)) st.chosen = undefined
+    if (EFFORT_ARGS.includes(level) && (await $.env.get('CLAUDE_CODE_EFFORT_LEVEL')) !== undefined) {
+      await $.env.set('CLAUDE_CODE_EFFORT_LEVEL', level === 'auto' ? undefined : level)
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 

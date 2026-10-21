@@ -52,8 +52,15 @@ test_band_me_and_savings_come_from_policy_json_sanitized() {
     "savings":{"as_of":"2026-10-20T10:05:00Z","money_kind":"usd","today_usd":3.8,"since_on_usd":null,"today_tokens":1400000,"since_on_tokens":9000000,"since_on_date":"2026-10-08","tier":"estimated"}}'
   local out; out=$(band)
   t_eq "$(printf 'me\tNoa "N" Levi \327\240\327\225\327\242\327\224\t%s\tmember\t-\t-' "$(printf 'x%.0s' $(seq 1 80))")" "$(line "$out" me)"
-  t_eq "$(printf 'savings\tusd\t3.8\t-\t1400000\t9000000\t2026-10-08\t%s' $((T0 + 300)))" "$(line "$out" savings)"
+  t_eq "$(printf 'savings\tusd\t3.8\t-\t1400000\t9000000\t2026-10-08\t-\t-\t-\t%s' $((T0 + 300)))" "$(line "$out" savings)"
   t_eq 0 "$(t_calls)"
+}
+
+test_band_savings_since_on_negatives_nulls_and_potential() { # AIO-867
+  policy_json '{"savings":{"money_kind":"api_value","today_usd":null,"since_on_usd":-2.5,"today_tokens":null,"since_on_tokens":-120000,"since_on_date":"2026-10-21","could_save_usd":61.2,"could_save_tokens":2100000,"counted_days":3,"as_of":"2026-10-20T10:00:00Z"}}'
+  t_eq "$(printf 'savings\tapi_value\t-\t-2.5\t-\t-120000\t2026-10-21\t61.2\t2100000\t3\t%s' "$T0")" "$(line "$(band)" savings)"
+  policy_json '{"savings":{"money_kind":"usd","since_on_tokens":1.5,"counted_days":"3","could_save_tokens":12345678901234567}}'
+  t_eq "$(printf 'savings\tusd\t-\t-\t-\t-\t-\t-\t-\t-\t0')" "$(line "$(band)" savings)"
 }
 
 test_band_names_are_cut_at_80_characters_not_bytes() {
@@ -68,7 +75,7 @@ test_band_subscription_savings_and_malformed_blocks() {
   policy_json '{"me":{"org_name":"Acme"},"savings":{"money_kind":"api_value","today_usd":5.1,"since_on_usd":40,"today_tokens":1400000,"since_on_tokens":9000000,"since_on_date":"2026-10-08","as_of":"bad"}}'
   local out; out=$(band)
   t_lacks "$out" "me$TAB" "no display name, no me line"
-  t_eq "$(printf 'savings\tapi_value\t5.1\t40\t1400000\t9000000\t2026-10-08\t0')" "$(line "$out" savings)"
+  t_eq "$(printf 'savings\tapi_value\t5.1\t40\t1400000\t9000000\t2026-10-08\t-\t-\t-\t0')" "$(line "$out" savings)"
   policy_json '{"savings":{"money_kind":"eur","today_usd":1}}'
   t_lacks "$(band)" "savings$TAB"
   policy_json 'not json'

@@ -11,11 +11,18 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 export type Me = { name: string; org: string; role: string; lead: string; computer: string }
 export type Savings = {
   kind: 'usd' | 'api_value'
+  // AIO-867: since-on is cumulative from the first full day after install;
+  // amounts may be negative (regressions net) and are null with no data.
   todayUsd: number | null
   sinceUsd: number | null
-  todayTokens: number
-  sinceTokens: number
+  todayTokens: number | null
+  sinceTokens: number | null
   sinceDate: string
+  // The potential: what could have been saved in the 30 days before install.
+  couldUsd: number | null
+  couldTokens: number | null
+  // Whole UTC days since-on covers; 0 on the install day, null without one.
+  countedDays: number | null
   asOf: number
 }
 export type MethodFact = {
@@ -73,7 +80,8 @@ export const TIPS: Record<string, string> = {
   handoff: 'A long chat left idle gets a note to go on in a new session.',
   unused_services: 'Tools unused for 30 days are turned off; /mcp turns one back on.',
   write_minimum: 'Claude writes only what the task needs.',
-  saved: 'An estimate of the tokens these methods saved. On a subscription plan it is not money you were charged.',
+  saved:
+    'An estimate since the first full day after install, net of anything that got worse. On a subscription plan it is not money you were charged.',
 }
 const CLICK: Record<Action['kind'], string> = {
   bypass: 'Click: off for you for 1 hour.',
@@ -88,6 +96,7 @@ export const tipScope = (id: string): string => `aionas-tip-${id}`
 
 const int = (s: string | undefined): number => (s !== undefined && /^[0-9]+$/.test(s) ? Number(s) : 0)
 const name = (s: string | undefined): string => (s === undefined || s === '-' ? '' : s)
+const sint = (s: string | undefined): number | null => (s !== undefined && /^-?[0-9]+$/.test(s) ? Number(s) : null)
 const amount = (s: string | undefined): number | null => {
   if (s === undefined || s === '-' || s.trim() === '') return null
   const n = Number(s)
@@ -118,15 +127,18 @@ export const parseBand = (out: string): Facts => {
           f.me = { name: name(p[1]), org: name(p[2]), role: name(p[3]), lead: name(p[4]), computer: name(p[5]) }
         break
       case 'savings':
-        if (p.length === 8 && (p[1] === 'usd' || p[1] === 'api_value'))
+        if (p.length === 11 && (p[1] === 'usd' || p[1] === 'api_value'))
           f.savings = {
             kind: p[1],
             todayUsd: amount(p[2]),
             sinceUsd: amount(p[3]),
-            todayTokens: int(p[4]),
-            sinceTokens: int(p[5]),
+            todayTokens: sint(p[4]),
+            sinceTokens: sint(p[5]),
             sinceDate: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(p[6] ?? '') ? (p[6] as string) : '',
-            asOf: int(p[7]),
+            couldUsd: amount(p[7]),
+            couldTokens: sint(p[8]),
+            countedDays: sint(p[9]),
+            asOf: int(p[10]),
           }
         break
       case 'method':
@@ -168,8 +180,9 @@ export const fmtTokens = (n: number): string => {
   return `${String(Math.round(n / 100_000) / 10)}M`
 }
 
+// Never a negative amount: no saving is drawn as a dash, never "-$".
 export const fmtUsd = (v: number | null, approx: '~' | '≈ ' = '~'): string =>
-  v === null ? '—' : `${approx}$${v.toFixed(2)}`
+  v === null || v <= 0 ? '—' : `${approx}$${v.toFixed(2)}`
 
 // The local wall-clock time of an epoch, as this computer shows it.
 export const hhmm = (epoch: number, tzOffset: number): string => {
@@ -228,38 +241,60 @@ export const chipsOf = (
     return chip(`● ${base}${extra}`, 'on', m.id === 'effort_default' ? 'xhigh' : 'bypass')
   })
 
-// "saved today <amount><tail>": the amount drawn strong, the rest plain/dim.
-export const savedParts = (s: Savings): { amount: string; tail: string } =>
-  s.kind === 'api_value'
-    ? { amount: `${fmtTokens(s.todayTokens)} tokens`, tail: ` (${fmtUsd(s.todayUsd, '≈ ')} API value, est.)` }
-    : { amount: fmtUsd(s.todayUsd), tail: ' est.' }
+// A figure is measured when it is above zero: tokens for a subscription
+// (API value), dollars otherwise. Zero, a regression or no data reads as
+// "No saving measured yet", never as a negative number.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export const dayLabel = (iso: string): string => {
+  const m = /^[0-9]{4}-([0-9]{2})-([0-9]{2})$/.exec(iso)
+  return m === null ? '' : `${Number(m[2])} ${MONTHS[Number(m[1]) - 1] ?? ''}`
+}
+const isMeasured = (kind: Savings['kind'], usd: number | null, tokens: number | null): boolean =>
+  kind === 'api_value' ? tokens !== null && tokens > 0 : usd !== null && usd > 0
+const figure = (kind: Savings['kind'], usd: number | null, tokens: number | null): { amount: string; tail: string } =>
+  kind === 'api_value'
+    ? { amount: `${fmtTokens(tokens ?? 0)} tokens`, tail: usd !== null && usd > 0 ? ` (${fmtUsd(usd, '≈ ')} API value)` : '' }
+    : { amount: fmtUsd(usd), tail: '' }
+const plain = (x: { amount: string; tail: string }): string => `${x.amount}${x.tail}`
+
+// The potential is shown next to the figure for the first 14 counted days.
+export const potentialLine = (s: Savings): string | undefined => {
+  if (s.countedDays !== null && s.countedDays >= 14) return undefined
+  if (!isMeasured(s.kind, s.couldUsd, s.couldTokens)) return undefined
+  return `potential this month ${plain(figure(s.kind, s.couldUsd, s.couldTokens))}`
+}
+
+// One line: "saved since 21 Oct <amount><tail>", the amount drawn strong.
+export const savedParts = (s: Savings): { lead: string; amount: string; tail: string } => {
+  const potential = potentialLine(s)
+  const more = potential === undefined ? '' : ` · ${potential}`
+  if (!isMeasured(s.kind, s.sinceUsd, s.sinceTokens)) return { lead: 'No saving measured yet', amount: '', tail: more }
+  const f = figure(s.kind, s.sinceUsd, s.sinceTokens)
+  const since = dayLabel(s.sinceDate)
+  return { lead: since === '' ? 'saved ' : `saved since ${since} `, amount: f.amount, tail: `${f.tail} est.${more}` }
+}
 
 export const savedLine = (s: Savings): string => {
   const p = savedParts(s)
-  return `saved today ${p.amount}${p.tail}`
+  return `${p.lead}${p.amount}${p.tail}`
 }
 
-export const sinceDays = (s: Savings, now: number, tzOffset: number): number | undefined => {
-  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(s.sinceDate)
-  if (m === null) return undefined
-  const since = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000
-  const today = Math.floor((now + tzOffset) / 86400)
-  return Math.max(1, today - since + 1)
-}
-
-export const savedFull = (s: Savings, now: number, tzOffset: number): string => {
-  const days = sinceDays(s, now, tzOffset)
-  const span = days === undefined ? 'since on' : `since on (${days} ${days === 1 ? 'day' : 'days'})`
-  const today =
-    s.kind === 'api_value'
-      ? `${fmtTokens(s.todayTokens)} tokens (${fmtUsd(s.todayUsd, '≈ ')} API value)`
-      : fmtUsd(s.todayUsd)
-  const since =
-    s.kind === 'api_value'
-      ? `${fmtTokens(s.sinceTokens)} tokens (${fmtUsd(s.sinceUsd, '≈ ')} API value)`
-      : fmtUsd(s.sinceUsd)
-  const updated = s.asOf > 0 ? ` · updated ${hhmm(s.asOf, tzOffset)}` : ''
-  return `saved today ${today} · ${span} ${since} · estimated${updated}`
+// The full view: the cumulative figure with its counted days, today, the
+// potential, and when the server computed it.
+export const savedFull = (s: Savings, tzOffset: number): string => {
+  const parts: string[] = []
+  if (isMeasured(s.kind, s.sinceUsd, s.sinceTokens)) {
+    const since = dayLabel(s.sinceDate)
+    const days = s.countedDays !== null && s.countedDays > 0 ? ` (${s.countedDays} ${s.countedDays === 1 ? 'day' : 'days'})` : ''
+    const head = since === '' ? 'saved' : `saved since ${since}`
+    parts.push(`${head}${days} ${plain(figure(s.kind, s.sinceUsd, s.sinceTokens))}`)
+    if (isMeasured(s.kind, s.todayUsd, s.todayTokens)) parts.push(`today ${plain(figure(s.kind, s.todayUsd, s.todayTokens))}`)
+  } else parts.push('No saving measured yet')
+  const potential = potentialLine(s)
+  if (potential !== undefined) parts.push(potential)
+  parts.push('estimated')
+  if (s.asOf > 0) parts.push(`updated ${hhmm(s.asOf, tzOffset)}`)
+  return parts.join(' · ')
 }
 
 const cells = (s: string): number => [...s].length
@@ -381,7 +416,7 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
           {f.me === undefined ? <Text dimColor>{line.who}</Text> : <Text>{f.me.name}</Text>}
           {f.me !== undefined && line.who !== f.me.name && <Text dimColor>{line.who.slice(f.me.name.length)}</Text>}
           {f.savings !== undefined && <Text dimColor> │ </Text>}
-          {f.savings !== undefined && <Text>saved today </Text>}
+          {f.savings !== undefined && <Text>{savedParts(f.savings).lead}</Text>}
           {f.savings !== undefined && (
             <Text color="success" weight="bold" hover={{ scope: tipScope('saved') }}>
               {savedParts(f.savings).amount}
@@ -420,7 +455,7 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
     if (f.savings !== undefined)
       rows.push(
         <Text key="aionas-saved" hover={{ scope: tipScope('saved') }}>
-          {savedFull(f.savings, f.now, f.tzOffset)}
+          {savedFull(f.savings, f.tzOffset)}
         </Text>,
       )
     rows.push(

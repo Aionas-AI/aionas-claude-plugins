@@ -42,8 +42,8 @@ type World = {
 }
 
 const ME = ['me', 'Noa Levi', 'Acme', 'member', 'Omer Katz', 'mbp-noa'].join('\t')
-const SAVINGS_USD = ['savings', 'usd', '3.8', '46.2', '0', '0', '2026-10-08', String(T0 + 300)].join('\t')
-const SAVINGS_SUB = ['savings', 'api_value', '5.1', '40', '1400000', '9000000', '2026-10-08', String(T0)].join('\t')
+const SAVINGS_USD = ['savings', 'usd', '3.8', '46.2', '0', '0', '2026-10-08', '-', '-', '13', String(T0 + 300)].join('\t')
+const SAVINGS_SUB = ['savings', 'api_value', '5.1', '40', '1400000', '9000000', '2026-10-08', '-', '-', '13', String(T0)].join('\t')
 
 function bandOut(w: World): string {
   const lines = [`clock\t${w.now}\t10800`]
@@ -161,7 +161,7 @@ describe('band: one line and the full view (M1)', () => {
     await start($)
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
-      expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · Acme · mbp-noa · subscription │ saved today ~\$3\.80 est\./ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · Acme · mbp-noa · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
       expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard')
       expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toContain('● high')
       expect((await ui.find({ key: 'aionas-chip-subagent_sonnet' }))?.text).toContain('● sonnet subagents')
@@ -174,7 +174,7 @@ describe('band: one line and the full view (M1)', () => {
       await ui.press({ key: 'aionas-more' })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · member · lead Omer Katz · computer mbp-noa · via subscription/ })).toBeDefined()
       expect(
-        await ui.find({ type: 'Text', text: 'saved today ~$3.80 · since on (13 days) ~$46.20 · estimated · updated 13:05' }),
+        await ui.find({ type: 'Text', text: 'saved since 8 Oct (13 days) ~$46.20 · today ~$3.80 · estimated · updated 13:05' }),
       ).toBeDefined()
       expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard · 4 today')
       expect(await ui.find({ key: 'aionas-xhigh' })).toBeDefined()
@@ -195,7 +195,7 @@ describe('band: one line and the full view (M1)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /^aionas │ subscription │$/ })).toBeDefined()
-      expect(await ui.find({ text: /saved today/ })).toBeUndefined()
+      expect(await ui.find({ text: /saved since|No saving/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-noisy_guard' })).toBeDefined()
       await ui.unmount()
     }
@@ -231,23 +231,23 @@ describe('band: one line and the full view (M1)', () => {
     world(on)
     await start($)
     for (const surface of SURFACES) {
-      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 187 } })
+      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 194 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · mbp-noa · subscription │/ })).toBeDefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 186 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 193 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · subscription │/ })).toBeDefined()
       expect(await ui.find({ text: /mbp-noa/ })).toBeUndefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 172 } })
-      expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved today/ })).toBeDefined()
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 179 } })
+      expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct/ })).toBeDefined()
       expect(await ui.find({ text: /Acme/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeDefined()
       await ui.unmount()
 
       ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 60 } })
-      expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved today ~\$3\.80 est\./ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
       expect(await ui.find({ text: /Acme|mbp-noa/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-output_store' })).toBeDefined()
       expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeUndefined()
@@ -265,18 +265,66 @@ describe('band: one line and the full view (M1)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
       expect(
-        await ui.find({ type: 'Text', text: /mbp-noa · gateway │ saved today 1\.4M tokens \(≈ \$5\.10 API value, est\.\)/ }),
+        await ui.find({ type: 'Text', text: /mbp-noa · gateway │ saved since 8 Oct 9M tokens \(≈ \$40\.00 API value\) est\./ }),
       ).toBeDefined()
       await ui.press({ key: 'aionas-more' })
       expect(
         await ui.find({
           type: 'Text',
-          text: 'saved today 1.4M tokens (≈ $5.10 API value) · since on (13 days) 9M tokens (≈ $40.00 API value) · estimated · updated 13:00',
+          text: 'saved since 8 Oct (13 days) 9M tokens (≈ $40.00 API value) · today 1.4M tokens (≈ $5.10 API value) · estimated · updated 13:00',
         }),
       ).toBeDefined()
       await ui.press({ key: 'aionas-less' })
       await ui.unmount()
     }
+  })
+})
+
+describe('band: the savings figure (AIO-867)', () => {
+  const line = (f: (string | number)[]): string => ['savings', ...f.map(String)].join('\t')
+  test('install day: no number, the potential instead; never a negative amount', async ($, on) => {
+    const w = world(on)
+    w.savings = line(['api_value', '-', '-', '-', '-', '2026-10-20', '61.2', '2100000', '0', T0])
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
+      expect(
+        await ui.find({ type: 'Text', text: /│ No saving measured yet · potential this month 2\.1M tokens \(≈ \$61\.20 API value\)/ }),
+      ).toBeDefined()
+      expect(await ui.find({ text: /-\$|saved today/ })).toBeUndefined()
+      await ui.unmount()
+    }
+    w.savings = line(['usd', '-1.2', '-4.5', '-300', '-900', '2026-10-08', '20', '-', '20', T0])
+    await w.clock.advance(30_000)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, bodyColumns: 300 } })
+    expect(await ui.find({ type: 'Text', text: /│ No saving measured yet │/ })).toBeDefined()
+    expect(await ui.find({ text: /-\$|potential/ })).toBeUndefined()
+    await ui.press({ key: 'aionas-more' })
+    expect(await ui.find({ type: 'Text', text: 'No saving measured yet · estimated · updated 13:00' })).toBeDefined()
+  })
+
+  test('the potential shows beside the figure until 14 counted days', async ($, on) => {
+    const w = world(on)
+    w.savings = line(['api_value', '1', '5.1', '100000', '1400000', '2026-10-17', '61.2', '2100000', '3', T0])
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 300 } })
+    expect(
+      await ui.find({
+        type: 'Text',
+        text: /saved since 17 Oct 1\.4M tokens \(≈ \$5\.10 API value\) est\. · potential this month 2\.1M tokens/,
+      }),
+    ).toBeDefined()
+    await ui.press({ key: 'aionas-more' })
+    expect(
+      await ui.find({
+        type: 'Text',
+        text: 'saved since 17 Oct (3 days) 1.4M tokens (≈ $5.10 API value) · today 100K tokens (≈ $1.00 API value) · potential this month 2.1M tokens (≈ $61.20 API value) · estimated · updated 13:00',
+      }),
+    ).toBeDefined()
+    await ui.press({ key: 'aionas-less' })
+    w.savings = line(['api_value', '1', '5.1', '100000', '1400000', '2026-10-01', '61.2', '2100000', '14', T0])
+    await w.clock.advance(30_000)
+    expect(await ui.find({ text: /potential/ })).toBeUndefined()
   })
 })
 
@@ -422,10 +470,10 @@ describe('band: chips and the one-click bypass (M3)', () => {
     await start($)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     const n = w.bandReads()
-    w.savings = SAVINGS_USD.replace('\t3.8\t', '\t4.25\t')
+    w.savings = SAVINGS_USD.replace('\t46.2\t', '\t50.25\t')
     await clock.advance(30_000)
     expect(w.bandReads()).toBe(n + 1)
-    expect(await ui.find({ type: 'Text', text: /saved today ~\$4\.25 est\./ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /saved since 8 Oct ~\$50\.25 est\./ })).toBeDefined()
     await $.turn.complete({ turnId: 't1', reason: 'answer', answer: '', durationMs: 1, isAborted: false })
     await clock.settle()
     expect(w.bandReads()).toBe(n + 2)

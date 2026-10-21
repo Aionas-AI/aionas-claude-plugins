@@ -33,7 +33,9 @@ policy() {
   export FAKE_CURL_STATUS=200 FAKE_CURL_BODY="$HOME/policy.json"
   t_rc 0 aionas_policy_sync
 }
-store_marker() { printf '[aionas-store: kept 40+40 of %s lines, id=%s. More: aionas-recall %s [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]' "$1" "$2" "$2"; }
+store_marker() { printf '[aionas-store: kept 40+40 of %s lines (about %s tokens), id=%s. More: aionas-recall %s [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]' "$1" "$3" "$2" "$2"; }
+# ftok FILE: the full output's size in tokens as the markers say it (bytes / 4, rounded down).
+ftok() { echo $(( $(wc -c <"$1" | tr -d ' ') / 4 )); }
 
 test_view_is_head_40_tail_40_and_the_fixed_marker_byte_for_byte() {
   setup
@@ -43,12 +45,14 @@ test_view_is_head_40_tail_40_and_the_fixed_marker_byte_for_byte() {
   out1=$(post './build.sh' "$HOME/o.txt")
   out2=$(post './build.sh' "$HOME/o.txt")
   t_eq "$out1" "$out2" "same output, different answer"
-  want="$(head -n 40 "$HOME/o.txt")"$'\n'"$(tail -n 40 "$HOME/o.txt")"$'\n'"$(store_marker 300 "$id")"
+  want="$(head -n 40 "$HOME/o.txt")"$'\n'"$(tail -n 40 "$HOME/o.txt")"$'\n'"$(store_marker 300 "$id" "$(ftok "$HOME/o.txt")")"
   t_eq "$want" "$(view "$out1")"
   # Byte-for-byte in the JSON that reaches Claude Code, too.
   t_contains "$out1" "\"stdout\":$(aionas_json_escape "$want"),"
   # The fixed marker, as a literal string.
-  t_eq "[aionas-store: kept 40+40 of 300 lines, id=$id. More: aionas-recall $id [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]" "$(view "$out1" | tail -n 1)"
+  t_eq "[aionas-store: kept 40+40 of 300 lines (about $(ftok "$HOME/o.txt") tokens), id=$id. More: aionas-recall $id [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]" "$(view "$out1" | tail -n 1)"
+  # F is the whole output (not the view): 300 lines of 90 bytes plus 299 newlines = 27299 bytes.
+  t_eq 6824 "$(ftok "$HOME/o.txt")"
   case "$id" in out_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) t_fail "bad id $id" ;; esac
   t_eq "output_store fired 1
 output_store fired 1" "$(queue)"
@@ -145,18 +149,19 @@ test_guard_caps_sed_grep_cat_at_1500_tokens() {
     t_eq "$(head -n "$kept" "$HOME/o.txt")" "$(sed '$d' <<<"$v")"
     t_ok test "$(sed '$d' <<<"$v" | wc -c | tr -d ' ')" -le 6000
     t_ok test "$kept" -ge 50
-    t_eq "[aionas-guard: capped $rule at about 1500 tokens: kept $kept of 100 lines, id=$id. More: aionas-recall $id [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]" "$(tail -n 1 <<<"$v")"
+    t_eq "$out" "$(post "$c" "$HOME/o.txt")" "same output, different answer"
+    t_eq "[aionas-guard: capped $rule at about 1500 tokens: kept $kept of 100 lines (about $(ftok "$HOME/o.txt") tokens), id=$id. More: aionas-recall $id [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]" "$(tail -n 1 <<<"$v")"
   done
   t_ok same_bytes "$HOME/o.txt" "$(aionas_savings_dir)/store/$id.txt"
-  t_eq "noisy_guard fired 4" "$(queue | sort | uniq -c | awk '{ print $2, $3, $1 }')"
+  t_eq "noisy_guard fired 8" "$(queue | sort | uniq -c | awk '{ print $2, $3, $1 }')"
   # Under the cap: untouched.
   gen 60 >"$HOME/s.txt"
   t_eq "" "$(post 'cat s' "$HOME/s.txt")"
   # sed -i is not a cap rule, and with noisy_guard off a cat is not capped:
   # both fall to the store (2,000 tokens).
-  t_contains "$(view "$(post 'sed -i s/a/b/ f' "$HOME/o.txt")" | tail -n 1)" "[aionas-store: kept 40+40 of 100 lines"
+  t_contains "$(view "$(post 'sed -i s/a/b/ f' "$HOME/o.txt")" | tail -n 1)" "[aionas-store: kept 40+40 of 100 lines (about "
   policy '{"methods":[{"method_id":"noisy_guard","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
-  t_contains "$(view "$(post 'cat big.log' "$HOME/o.txt")" | tail -n 1)" "[aionas-store: kept 40+40 of 100 lines"
+  t_contains "$(view "$(post 'cat big.log' "$HOME/o.txt")" | tail -n 1)" "[aionas-store: kept 40+40 of 100 lines (about "
 }
 
 test_cap_marker_names_the_rule() {
@@ -269,7 +274,7 @@ test_only_counts_reach_the_server() {
   body=$(t_call 1 body)
   t_eq "https://gw.example.test/enroll/v1/savings/counters" "$(t_call 1 url)"
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"(noisy_guard|output_store)","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.1.1","counters":[,,,]}' "$rest"
+  t_eq '{"plugin_version":"0.1.2","counters":[,,,]}' "$rest"
   all=$(cat "$FAKE_CURL_LOG"/*/* 2>/dev/null)
   for n in SECRET hunter2 deploy secrets.env build line; do t_lacks "$all" "$n" "content sent"; done
 }
@@ -299,7 +304,7 @@ test_shipped_hooks_json_reaches_the_real_guard_and_store() {
   id="out_$(sha12 "$HOME/o.txt")"
   out=$(printf '{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"./build.sh"},"tool_response":{"stdout":%s,"stderr":"","interrupted":false,"isImage":false},"tool_use_id":"t1"}' \
     "$(aionas_json_escape "$(cat "$HOME/o.txt")")" | bash -c "$post_cmd")
-  t_eq "$(store_marker 300 "$id")" "$(view "$out" | tail -n 1)"
+  t_eq "$(store_marker 300 "$id" "$(ftok "$HOME/o.txt")")" "$(view "$out" | tail -n 1)"
 }
 
 t_main "$@"

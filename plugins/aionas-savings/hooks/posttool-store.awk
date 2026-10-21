@@ -4,6 +4,7 @@
 # those bytes, so the same output always gives the same view.
 #
 #   mode=decode body=FILE        write the decoded bytes to FILE
+#   full=F is the decoded output's byte count; markers say (about F/4 tokens).
 #   mode=store id=ID head=H tail=T keep=K
 #       when there are more than H+T lines: print the JSON-escaped view
 #       head(H) + up to K FAILED/Error lines from between + tail(T) + marker
@@ -22,7 +23,7 @@ END {
     k = 0
     for (i = head + 1; i <= n - tail && k < keep; i++) if (L[i] ~ /FAILED|Error|ERROR/) { o = o "\\n" L[i]; k++ }
     for (i = n - tail + 1; i <= n; i++) o = o "\\n" L[i]
-    o = o "\\n[aionas-store: kept " head "+" tail " of " n " lines, id=" id ". More: aionas-recall " id " [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]"
+    o = o "\\n[aionas-store: kept " head "+" tail " of " n " lines (about " int(full / 4) " tokens), id=" id ". More: aionas-recall " id " [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]"
     printf "%s", o
     exit
   }
@@ -37,7 +38,7 @@ END {
     if (kept < 1 || kept >= n) exit
     k = 0
     for (; i <= n && k < keep; i++) if (L[i] ~ /FAILED|Error|ERROR/) { o = o "\\n" L[i]; k++ }
-    o = o "\\n[aionas-guard: capped " rule " at about " tokens " tokens: kept " kept " of " n " lines, id=" id ". More: aionas-recall " id " [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]"
+    o = o "\\n[aionas-guard: capped " rule " at about " tokens " tokens: kept " kept " of " n " lines (about " int(full / 4) " tokens), id=" id ". More: aionas-recall " id " [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]"
     printf "%s", o
     exit
   }

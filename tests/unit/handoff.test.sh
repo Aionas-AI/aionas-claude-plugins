@@ -9,16 +9,25 @@ SID=sess-abc123
 SECRET1="SECRET-PROMPT-TEXT-91"
 SECRET2="SECRET-REPLY-TEXT-77"
 
+PROMPT=p-0001  # the prompt_id of the turn that just ended (Claude Code puts it on that turn's user line)
+
+# user_line [PROMPT_ID]: the user line that starts a turn. assistant_line TOKENS [STOP_REASON]: an answer.
+user_line() { printf '{"type":"user","promptId":"%s","message":{"role":"user","content":"%s \\"usage\\": \\"input_tokens\\":999999"}}\n' "${1:-$PROMPT}" "$SECRET1"; }
+assistant_line() {
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}],"stop_reason":"%s","usage":{"input_tokens":5,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":10}}}\n' "$SECRET2" "${2:-end_turn}" "$(($1 - 1005))"
+}
+
 # transcript TOKENS [FILE]: a transcript whose last answer used TOKENS of context.
 transcript() {
   local f=${2:-$HOME/proj/$SID.jsonl}
   mkdir -p "$(dirname "$f")"
-  {
-    printf '{"type":"user","message":{"role":"user","content":"%s \\"usage\\": \\"input_tokens\\":999999"}}\n' "$SECRET1"
-    printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"input_tokens":5,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"output_tokens":10}}}\n' "$SECRET2" "$(($1 - 1005))"
-  } >"$f"
+  { user_line; assistant_line "$1"; } >"$f"
   echo "$f"
 }
+
+# append_later SECONDS FILE LINE...: Claude Code writes the turn's answer to the
+# transcript a little after the Stop hook starts (its write queue drains on a timer).
+append_later() { local s=$1 f=$2; shift 2; (sleep "$s"; printf '%s' "$@" >>"$f") & }
 
 # policy PARAMS_ROWS...: a cached policy with handoff on (rows are extra P lines).
 policy() {
@@ -31,7 +40,9 @@ policy_low() { policy "$(printf 'threshold_tokens\tn\t20000')" "$(printf 'idle_m
 stop_input() {
   local bg=''
   [ -n "${2:-}" ] && bg=",\"background_tasks\":[{\"id\":\"t1\",\"type\":\"local_agent\",\"status\":\"$2\",\"description\":\"d\"}]"
-  printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false%s}' "$SID" "$1" "$HOME/proj" "$bg"
+  local pid=''
+  [ -n "$PROMPT" ] && pid=",\"prompt_id\":\"$PROMPT\""
+  printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s"%s,"hook_event_name":"Stop","stop_hook_active":false%s}' "$SID" "$1" "$HOME/proj" "$pid" "$bg"
 }
 
 # run_stop SCRIPT TRANSCRIPT [BG]: start the Stop hook in the background; OUT/ERR/RC files.
@@ -39,6 +50,7 @@ run_stop() {
   local n; n=$(mktemp -d "$T_ROOT/run.XXXXXX")
   stop_input "$2" "${3:-}" >"$n/in"
   (AIONAS_HANDOFF_IDLE_SECONDS=${IDLE:-2} AIONAS_HANDOFF_POLL_SECONDS=1 AIONAS_HANDOFF_BUSY_SECONDS=${BUSY:-3} \
+    AIONAS_HANDOFF_SETTLE_SECONDS=${SETTLE:-4} \
     bash "$HOOKS/$1" <"$n/in" >"$n/out" 2>"$n/err"; echo $? >"$n/rc") &
   RUN=$n
 }
@@ -69,6 +81,109 @@ test_default_threshold_is_200k() {
   run_stop handoff-arm.sh "$(transcript 150000)"
   t_eq 0 "$(wait_rc "$RUN")"
   t_not test -e "$(hdir)/$SID.armed"
+}
+
+# The first turn: when the Stop hook starts, the transcript has the prompt but
+# not yet the answer. The hook waits for the answer instead of giving up.
+test_first_turn_arms_when_the_answer_lands_after_stop() {
+  policy_low
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  user_line >"$f"
+  append_later 1 "$f" "$(assistant_line 30000)"
+  IDLE=3 run_stop handoff-arm.sh "$f"
+  sleep 2
+  t_ok test -f "$(hdir)/$SID.armed"
+  t_contains "$(cat "$(hdir)/$SID.state" 2>/dev/null)" "$(printf 'armed\t')"
+  t_contains "$(cat "$(hdir)/$SID.state" 2>/dev/null)" "$(printf '\t30000')"
+  t_eq 2 "$(wait_rc "$RUN")" "the first turn's timer wakes the session"
+  t_contains "$(cat "$RUN/err")" "about 30K tokens"
+}
+
+# A later turn: the transcript still ends with the previous answer (below the
+# threshold) when the hook starts. The size is this turn's answer, not that one.
+test_later_turn_reads_this_turns_answer_not_the_previous_one() {
+  policy_low
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  { user_line p-0000; assistant_line 15000; user_line p-0001; } >"$f"
+  PROMPT=p-0001
+  append_later 1 "$f" "$(assistant_line 30000)"
+  IDLE=3 run_stop handoff-arm.sh "$f"
+  t_eq 2 "$(wait_rc "$RUN")" "armed on this turn's 30K, not the previous 15K"
+  t_contains "$(cat "$RUN/err")" "about 30K tokens"
+  # and the other way round: the previous answer was above, this one is below
+  t_fresh; policy_low; mkdir -p "$HOME/proj"; f="$HOME/proj/$SID.jsonl"
+  { user_line p-0000; assistant_line 30000; user_line p-0001; } >"$f"
+  append_later 1 "$f" "$(assistant_line 15000)"
+  run_stop handoff-arm.sh "$f"
+  t_eq 0 "$(wait_rc "$RUN")"
+  t_not test -e "$(hdir)/$SID.armed"
+}
+
+# A turn that used a tool: the tool call's line is written, the final answer
+# is not yet. The size is the final answer's.
+test_tool_turn_waits_for_the_final_answer() {
+  policy_low
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  { user_line; assistant_line 15000 tool_use; printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result"}]}}\n'; } >"$f"
+  append_later 1 "$f" "$(assistant_line 30000)"
+  IDLE=3 run_stop handoff-arm.sh "$f"
+  t_eq 2 "$(wait_rc "$RUN")"
+  t_contains "$(cat "$RUN/err")" "about 30K tokens"
+}
+
+# No prompt_id (an older Claude Code): the first turn still waits for an answer.
+test_first_turn_without_prompt_id_waits_too() {
+  policy_low
+  PROMPT=''
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  printf '{"type":"user","message":{"role":"user","content":"hi"}}\n' >"$f"
+  append_later 1 "$f" "$(assistant_line 30000)"
+  IDLE=3 run_stop handoff-arm.sh "$f"
+  t_eq 2 "$(wait_rc "$RUN")"
+}
+
+# The developer types again while the hook waits: that turn's Stop owns the
+# timer, so this one ends without arming.
+test_newer_prompt_during_the_wait_arms_nothing() {
+  policy_low
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  user_line >"$f"
+  append_later 1 "$f" "$(user_line p-0002)" "$(assistant_line 30000)"
+  run_stop handoff-arm.sh "$f"
+  t_eq 0 "$(wait_rc "$RUN")"
+  t_not test -e "$(hdir)/$SID.armed"
+  t_eq "" "$(cat "$RUN/err")"
+}
+
+test_turn_tokens_reads_only_this_turn() {
+  . "$HOOKS/handoff-wake.sh"
+  local f="$HOME/t.jsonl"
+  { user_line p-0000; assistant_line 15000; } >"$f"
+  t_rc 2 aionas_handoff_turn_tokens "$f" p-0001
+  user_line p-0001 >>"$f"
+  t_rc 1 aionas_handoff_turn_tokens "$f" p-0001
+  assistant_line 22000 tool_use >>"$f"
+  t_eq "22000 0" "$(aionas_handoff_turn_tokens "$f" p-0001)" "a tool call is not the final answer"
+  assistant_line 23000 >>"$f"
+  t_eq "23000 1" "$(aionas_handoff_turn_tokens "$f" p-0001)"
+  t_rc 3 aionas_handoff_turn_tokens "$f" p-0000  # an older turn sees that a newer one started
+  user_line p-0002 >>"$f"
+  t_rc 3 aionas_handoff_turn_tokens "$f" p-0001
+  t_rc 1 aionas_handoff_turn_tokens "$HOME/none.jsonl" p-0001
+}
+
+# The answer never lands (a turn that ended in an error): the wait is bounded,
+# and the hook ends silently without a timer.
+test_no_answer_ends_after_the_settle_wait() {
+  policy_low
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  user_line >"$f"
+  local start; start=$(date +%s)
+  SETTLE=2 run_stop handoff-arm.sh "$f"
+  t_eq 0 "$(wait_rc "$RUN")"
+  [ $(($(date +%s) - start)) -le 6 ] || t_fail "the settle wait is not bounded"
+  t_not test -e "$(hdir)/$SID.armed"
+  t_eq "" "$(cat "$RUN/err")$(cat "$RUN/out")"
 }
 
 test_idle_wakes_same_session_once_with_files() {

@@ -51,6 +51,63 @@ aionas_handoff_context_tokens() {
   echo "$_ct_sum"
 }
 
+# aionas_handoff_turn_tokens TRANSCRIPT PROMPT_ID: the context size of the
+# answer to the turn PROMPT_ID started (Claude Code puts "promptId" on that
+# turn's user line; the Stop input carries it as prompt_id). Prints
+# "<tokens> <final>", final 0 when that answer is a tool call (the final
+# answer is still to be written). Exit 1: no answer to this turn yet; 2: the
+# turn's user line is not in the transcript; 3: a newer turn started. Reads
+# the same three numbers as aionas_handoff_context_tokens and nothing else.
+aionas_handoff_turn_tokens() {
+  [ -f "$1" ] || return 1
+  tail -c 4000000 "$1" 2>/dev/null | awk -v pid="$2" '
+    function num(k,   s) { if (!match(line, "\"" k "\":[0-9]+")) return 0; s = substr(line, RSTART, RLENGTH); sub(/.*:/, "", s); return s + 0 }
+    !seen { if (index($0, "\"promptId\":\"" pid "\"")) seen = 1; next }
+    /"promptId":"/ && !index($0, "\"promptId\":\"" pid "\"") { newer = 1; exit }
+    /"(type|role)":"assistant"/ && /"input_tokens":/ { line = $0 }
+    END {
+      if (!seen) exit 2
+      if (newer) exit 3
+      if (line == "") exit 1
+      sum = num("input_tokens") + num("cache_creation_input_tokens") + num("cache_read_input_tokens")
+      if (sum < 1) exit 1
+      print sum, (line ~ /"stop_reason":"tool_use"/ ? 0 : 1)
+    }'
+}
+
+# aionas_handoff_wait_tokens TRANSCRIPT PROMPT_ID SECONDS: the context size of
+# this turn's answer, waiting up to SECONDS for it. The Stop hook starts before
+# Claude Code has written the turn's last lines to the transcript (its write
+# queue drains on a timer), so on the first turn there is no answer yet and on
+# later turns the last answer is the previous turn's. Exit 1 when there is no
+# size to use, or a newer turn started meanwhile. Without PROMPT_ID (an older
+# Claude Code) it waits for any answer, which covers the first turn.
+aionas_handoff_wait_tokens() {
+  [ -f "$1" ] || return 1
+  _wt_end=$(($(date +%s) + $3))
+  _wt_last=''
+  while :; do
+    if [ -n "$2" ]; then
+      _wt_r=$(aionas_handoff_turn_tokens "$1" "$2")
+      _wt_rc=$?
+      [ "$_wt_rc" -eq 3 ] && return 1
+      if [ "$_wt_rc" -eq 0 ]; then
+        _wt_last=${_wt_r% *}
+        [ "${_wt_r#* }" = 1 ] && { echo "$_wt_last"; return 0; }
+      fi
+    else
+      aionas_handoff_context_tokens "$1" && return 0
+      _wt_rc=1
+    fi
+    [ "$(date +%s)" -lt "$_wt_end" ] || break
+    sleep 0.25 2>/dev/null || sleep 1
+  done
+  # A tool call's size is close enough; with the turn's user line out of reach, the last answer.
+  [ -n "$_wt_last" ] && { echo "$_wt_last"; return 0; }
+  [ "$_wt_rc" -eq 2 ] && { aionas_handoff_context_tokens "$1"; return $?; }
+  return 1
+}
+
 # aionas_handoff_arm SID: take the timer. Prints the new token.
 aionas_handoff_arm() {
   aionas_mkdir "$(aionas_handoff_dir)" || return 1

@@ -35,6 +35,8 @@ type World = {
   savings: string | undefined
   window: string
   settings: Record<string, unknown>
+  flag: Record<string, unknown>
+  parentArgs: string
   compactAt: string
   now: number
   bandReads: () => number
@@ -76,6 +78,8 @@ function world(on: On, grant: string = 'high'): World {
     savings: SAVINGS_USD,
     window: 'window\t-\t0\thigh',
     settings: { effortLevel: 'medium', maxEffortLevel: 'high' },
+    flag: {},
+    parentArgs: '',
     compactAt: 'compact_at\t200000\t55',
     now: T0,
     bandReads: () => reads,
@@ -86,7 +90,7 @@ function world(on: On, grant: string = 'high'): World {
   on('session.id', () => ({ value: 'sess-test-1' }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('env.get', ($, e) => ({ value: env.get(e.name) }))
-  on('settings.read', () => ({ value: w.settings }) as never)
+  on('settings.read', ($, e) => ({ value: e.source === 'flag' ? w.flag : w.settings }) as never)
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('ui.toast', ($, e) => {
     w.toasts.push(String(e.text))
@@ -100,6 +104,7 @@ function world(on: On, grant: string = 'high'): World {
     const last = e.argv.slice(-2)
     let stdout = ''
     if (a.includes('effort-window.sh grant')) stdout = grant
+    else if (a.includes('ps -o args=')) stdout = w.parentArgs
     else if (a.includes('--band')) {
       reads += 1
       stdout = bandOut(w)
@@ -616,6 +621,67 @@ describe('effort grant', () => {
     ])
     expect(engine).toEqual(['high'])
     expect(w.envSets.at(-1)).toBeUndefined()
+  })
+})
+
+describe('effort grant: the app\'s picker (AIO-868, option 1)', () => {
+  const APP = '/Applications/Claude.app/claude --output-format stream-json --effort=max --model=claude-opus-5-5'
+
+  for (const [label, grant, args, want] of [
+    ['in a window, launched at Max: sends max', 'xhigh', APP, '{"output_config":{"effort":"max"}}'],
+    ['in a window, launched at Extra: sends xhigh', 'xhigh', APP.replace('--effort=max', '--effort xhigh'), '{"output_config":{"effort":"xhigh"}}'],
+    ['in a window, launched at Medium: sends nothing extra', 'xhigh', APP.replace('--effort=max', '--effort=medium'), undefined],
+    ['outside a window, launched at Max: sends nothing extra', 'high', APP, undefined],
+  ] as const) {
+    test(`the app's launch-time picker: ${label}`, async ($, on) => {
+      const w = world(on, grant)
+      w.parentArgs = args
+      const seen: (string | undefined)[] = []
+      bottomStep(on, w, seen)
+      await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+      await step($, 'high')
+      expect(seen).toEqual([want])
+    })
+  }
+
+  test('in a window session, the picker moved to Extra mid-session raises the next request; moved to Low or High drops it', async ($, on) => {
+    const w = world(on, 'xhigh')
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await step($, 'medium')
+    w.flag = { effortLevel: 'xhigh' }
+    await step($, 'high')
+    await step($, 'high')
+    w.flag = { effortLevel: 'low' }
+    await step($, 'low')
+    expect(seen).toEqual([undefined, '{"output_config":{"effort":"xhigh"}}', '{"output_config":{"effort":"xhigh"}}', undefined])
+  })
+
+  test('the latest choice wins: /effort max after the picker, then the picker again', async ($, on) => {
+    const w = world(on, 'xhigh')
+    w.flag = { effortLevel: 'xhigh' }
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await step($, 'high')
+    await $.command.run({ command: 'effort', args: 'max' } as never)
+    await step($, 'high')
+    w.flag = { effortLevel: 'high' }
+    await step($, 'high')
+    expect(seen).toEqual(['{"output_config":{"effort":"xhigh"}}', '{"output_config":{"effort":"max"}}', undefined])
+  })
+
+  test('outside a window the picker is never read and nothing is sent above the cap', async ($, on) => {
+    const w = world(on, 'high')
+    w.flag = { effortLevel: 'xhigh' }
+    w.parentArgs = APP
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await step($, 'high')
+    expect(seen).toEqual([undefined])
+    expect(w.argv.some(a => a.join(' ').includes('ps -o args='))).toBe(false)
   })
 })
 

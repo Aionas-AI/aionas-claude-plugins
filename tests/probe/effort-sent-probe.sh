@@ -7,8 +7,11 @@
 #   bash tests/probe/effort-sent-probe.sh      (CC_BIN=<claude binary> to skip npx)
 #
 # The window allows and never sets a level: a session opened in it sends its
-# usual level until the person types /effort xhigh or /effort max. Outside a
-# window the settings cap (maxEffortLevel=high) answers.
+# usual level until the person picks xhigh or max (/effort, or the app's
+# picker: --effort at launch, Extra mid-session as apply_flag_settings, the way
+# the desktop app sends it). Outside a window the settings cap
+# (maxEffortLevel=high) answers. A mid-session Max in the picker stays at the
+# cap: Claude Code drops max from the flag setting, so the plugin cannot see it.
 set -u
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 PLUGIN="$REPO/plugins/aionas-savings"
@@ -33,7 +36,8 @@ home() {
   echo "$h"
 }
 # sent HOME ARGS... -- MESSAGES...: one session, stream-json input (one line
-# per message), prints the effort of each main-loop request, space-separated.
+# per message; "@picker LEVEL" is the app's mid-session picker), prints the
+# effort of each main-loop request, space-separated.
 sent() {
   local h=$1; shift
   local args=() msgs=()
@@ -43,8 +47,14 @@ sent() {
   : >"$log"
   {
     for m in "${msgs[@]}"; do
-      printf '{"type":"user","message":{"role":"user","content":"%s"}}\n' "$m"
-      sleep 6
+      case "$m" in
+        "@picker "*)
+          printf '{"type":"control_request","request_id":"p%s","request":{"subtype":"apply_flag_settings","settings":{"effortLevel":"%s"}}}\n' $RANDOM "${m#@picker }"
+          sleep 2 ;;
+        *)
+          printf '{"type":"user","message":{"role":"user","content":"%s"}}\n' "$m"
+          sleep 6 ;;
+      esac
     done
   } | (cd "$ROOT" && env -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_EXTRA_BODY -u CLAUDE_CONFIG_DIR \
     HOME="$h" ANTHROPIC_BASE_URL="http://127.0.0.1:$port" ANTHROPIC_API_KEY=sk-ant-local-stub-not-a-key \
@@ -65,6 +75,13 @@ check "no window: /effort xhigh is capped" "high" "$(sent "$(home "$NEW" 0)" -- 
 check "window: a new session starts at its usual level" "medium" "$(sent "$(home "$NEW" 1)" -- hi)"
 check "window: /effort max, then /effort xhigh, then /effort high" "max xhigh high" \
   "$(sent "$(home "$NEW" 1)" -- '/effort max' hi '/effort xhigh' hi '/effort high' hi)"
+check "window: the app launched at Max" "max" "$(sent "$(home "$NEW" 1)" --effort=max -- hi)"
+check "window: picker Extra mid-session, then Low" "medium xhigh low" \
+  "$(sent "$(home "$NEW" 1)" -- hi '@picker xhigh' hi '@picker low' hi)"
+check "window: picker Max mid-session stays at the cap" "medium high" \
+  "$(sent "$(home "$NEW" 1)" -- hi '@picker max' hi)"
+check "no window: the app launched at Max, picker Extra" "high high" \
+  "$(sent "$(home "$NEW" 0)" --effort=max -- hi '@picker xhigh' hi)"
 check "window, older install pin high: starts at high, /effort max" "high max" \
   "$(sent "$(home "$OLD" 1)" -- hi '/effort max' hi)"
 

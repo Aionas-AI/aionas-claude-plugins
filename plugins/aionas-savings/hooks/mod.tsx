@@ -13,7 +13,8 @@
 // - The effort grant of W24-3, which ALLOWS and never sets a level (AIO-868):
 //   a session opened in an /aionas-xhigh window (or while effort_default is
 //   off for the person) starts at its usual level; when the person picks
-//   xhigh or max with /effort, that level goes on each main-loop request
+//   xhigh or max (with /effort, or the app's picker: at launch, or Extra
+//   mid-session), that level goes on each main-loop request
 //   through CLAUDE_CODE_EXTRA_BODY, set just before the request and put back
 //   right after it, so tools and subagents never inherit it. Every other
 //   session is left to the settings cap (maxEffortLevel=high); an older
@@ -59,6 +60,13 @@ export const withEffort = (base: string | undefined, level: Level): string | und
 
 export const splitArgs = (args: string): string[] => args.trim().split(/\s+/).filter(a => a !== '')
 
+const levelOf = (v: unknown): Level | undefined => (v === 'xhigh' || v === 'max' ? v : undefined)
+
+// The --effort the app launched this Claude Code with (its picker before the
+// first message), from the process's command line.
+export const launchEffort = (args: string): string | undefined =>
+  /(?:^|\s)--effort(?:=|\s+)(low|medium|high|xhigh|max)(?=\s|$)/.exec(args)?.[1]
+
 // The /effort arguments that name a level (Claude Code 2.1.299).
 const EFFORT_ARGS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto']
 
@@ -74,6 +82,11 @@ const st = {
   // the session starts at (an older install's pin, else effortLevel).
   sent: undefined as string | undefined,
   start: undefined as string | undefined,
+  // The app's mid-session picker reaches Claude Code as the flag setting
+  // effortLevel (apply_flag_settings); a change since the last request is
+  // the person's latest choice. Max is not kept there (Claude Code drops it),
+  // so a mid-session Max stays at the cap: /effort max is the way.
+  flag: undefined as unknown,
   baseExtra: undefined as string | undefined,
   baseUrl: undefined as string | undefined,
   facts: undefined as Facts | undefined,
@@ -127,10 +140,26 @@ function refresh($: EngineInterface): Promise<void> {
   return p
 }
 
+async function readFlag($: EngineInterface): Promise<unknown> {
+  try {
+    return (await $.settings.read({ source: 'flag' })).effortLevel
+  } catch {
+    return undefined
+  }
+}
+
 async function readGrant($: EngineInterface): Promise<Grant> {
   const r = await run($, [script($.plugin.root, 'hooks/effort-window.sh'), 'grant', st.sid])
   st.chosen = undefined
-  return parseGrant(r.out)
+  const g = parseGrant(r.out)
+  if (g === 'high') return g
+  // A granted session honours the level the app started it at, then the
+  // picker's flag setting when it is set.
+  const ps = await run($, ['-c', 'ps -o args= -p $PPID 2>/dev/null'])
+  st.chosen = levelOf(launchEffort(ps.out))
+  st.flag = await readFlag($)
+  if (st.flag !== undefined) st.chosen = levelOf(st.flag)
+  return g
 }
 
 async function readStart($: EngineInterface): Promise<void> {
@@ -206,7 +235,14 @@ export const register: Register = on => {
       st.sent = e.effort
       $.ui.invalidate('ui.render')
     }
-    await st.grant
+    if ((await st.grant) !== 'high') {
+      const flag = await readFlag($)
+      if (flag !== st.flag) {
+        st.flag = flag
+        st.chosen = levelOf(flag)
+        $.ui.invalidate('ui.render')
+      }
+    }
     if (st.chosen === undefined) return yield* next(e)
     const body = withEffort(st.baseExtra, st.chosen)
     if (body === undefined) return yield* next(e)

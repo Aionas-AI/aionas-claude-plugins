@@ -66,7 +66,7 @@ export const CHIP_LABELS: Record<string, string> = {
 // window's chip, `saved` the saved-today figure.
 export const TIPS: Record<string, string> = {
   effort_default: 'New sessions start at medium; high is the most you can pick.',
-  window: 'Sessions you open before the timer ends run at xhigh.',
+  window: 'Sessions you open before the timer ends may go up to xhigh or max with /effort.',
   subagent_sonnet: 'Sub-agents that do not pick a model run on Sonnet.',
   noisy_guard: 'Noisy commands are shortened.',
   output_store: 'Long output: Claude sees only its start, its end and the errors.',
@@ -78,7 +78,7 @@ export const TIPS: Record<string, string> = {
 const CLICK: Record<Action['kind'], string> = {
   bypass: 'Click: off for you for 1 hour.',
   end: 'Click: back on.',
-  xhigh: 'Click: sessions you open in the next 10 min start at xhigh.',
+  xhigh: 'Click: for 10 min, new sessions may go up to xhigh or max with /effort.',
 }
 export const tipOf = (c: Chip): string => {
   const base = `${c.tone === 'dim' ? 'Off now. ' : ''}${TIPS[c.tone === 'window' ? 'window' : c.method] ?? ''}`

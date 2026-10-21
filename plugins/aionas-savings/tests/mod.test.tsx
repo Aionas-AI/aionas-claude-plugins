@@ -129,7 +129,7 @@ function world(on: On, grant: string = 'high'): World {
   return w
 }
 
-const TIPS_WINDOW = 'Sessions you open before the timer ends run at xhigh.'
+const TIPS_WINDOW = 'Sessions you open before the timer ends may go up to xhigh or max with /effort.'
 
 const scriptRuns =(w: World, script: string): string[][] => w.argv.filter(a => a.some(x => x.endsWith(script)))
 
@@ -389,7 +389,7 @@ describe('band: chips and the one-click bypass (M3)', () => {
         'Noisy commands are shortened. Click: off for you for 1 hour.',
       )
       expect(await tip(ui, 'effort_default')).toBe(
-        'New sessions start at medium; high is the most you can pick. Click: sessions you open in the next 10 min start at xhigh.',
+        'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max with /effort.',
       )
       expect(await tip(ui, 'handoff')).toMatch(/^Off now\. A long chat left idle/)
       await ui.press({ key: 'aionas-chip-noisy_guard' })

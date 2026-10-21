@@ -129,7 +129,9 @@ function world(on: On, grant: string = 'high'): World {
   return w
 }
 
-const scriptRuns = (w: World, script: string): string[][] => w.argv.filter(a => a.some(x => x.endsWith(script)))
+const TIPS_WINDOW = 'Sessions you open before the timer ends run at xhigh. Risk: they use up your plan faster.'
+
+const scriptRuns =(w: World, script: string): string[][] => w.argv.filter(a => a.some(x => x.endsWith(script)))
 
 async function start($: any): Promise<void> {
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
@@ -355,6 +357,52 @@ describe('band: chips and the one-click bypass (M3)', () => {
       await clock.advance(15_000)
       expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toContain('● high')
       expect(await ui.find({ text: /new sessions in the next/ })).toBeUndefined()
+      await ui.unmount()
+    }
+  })
+
+  test('every chip and saved today has a hidden tip revealed on hover: what it is, its risk, what a click does', async ($, on) => {
+    const w = world(on)
+    w.methods.write_minimum = { ...(w.methods.write_minimum as M), state: 'off', active: 0 }
+    await start($)
+    const tip = async (ui: any, id: string) => {
+      const box = await ui.find({ key: `aionas-tip-${id}` })
+      expect(box?.props.display).toBe('none')
+      // The drawn tree carries hover on the element itself: the tip reveals in
+      // the scope, and at least one visible element (the chip) joins it.
+      const hovers: { key: unknown; hover: unknown }[] = []
+      const walk = (n: any): void => {
+        if (n === null || typeof n !== 'object') return
+        if (n.hover !== undefined) hovers.push({ key: n.props?.key, hover: n.hover })
+        for (const c of n.children ?? []) walk(c)
+      }
+      walk(await ui.drawn())
+      const scope = `aionas-tip-${id}`
+      expect(hovers.find(h => h.key === scope)?.hover).toEqual({ scope, display: 'flex' })
+      expect(hovers.some(h => h.key !== scope && (h.hover as any).scope === scope && (h.hover as any).display === undefined)).toBe(true)
+      return box?.text as string
+    }
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
+      expect(await tip(ui, 'saved')).toContain('not money you were charged')
+      expect(await tip(ui, 'noisy_guard')).toBe(
+        'Noisy commands are shortened. Risk: Claude may miss a line it needed. Click: off for you for 1 hour.',
+      )
+      expect(await tip(ui, 'effort_default')).toBe(
+        'New sessions start at high; max is blocked. Click: sessions you open in the next 10 min start at xhigh.',
+      )
+      expect(await tip(ui, 'handoff')).toMatch(/^Off now\. A long chat left idle/)
+      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      expect(await tip(ui, 'noisy_guard')).toMatch(/Risk: .* Click: back on\.$/)
+      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      await ui.press({ key: 'aionas-chip-effort_default' })
+      expect(await tip(ui, 'effort_default')).toBe(TIPS_WINDOW)
+      w.window = 'window\t-\t0\thigh'
+      w.now += 600
+      await w.clock.advance(15_000)
+      await ui.press({ key: 'aionas-more' })
+      expect(await tip(ui, 'write_minimum')).toMatch(/^Off now\. Claude writes only what the task needs\./)
+      await ui.press({ key: 'aionas-less' })
       await ui.unmount()
     }
   })

@@ -61,6 +61,31 @@ export const CHIP_LABELS: Record<string, string> = {
   write_minimum: 'write-min',
 }
 
+// One plain sentence per chip (what it does, its risk), shown in a row under
+// the band while the pointer is on the chip; `window` is the open xhigh
+// window's chip, `saved` the saved-today figure.
+export const TIPS: Record<string, string> = {
+  effort_default: 'New sessions start at high; max is blocked.',
+  window: 'Sessions you open before the timer ends run at xhigh. Risk: they use up your plan faster.',
+  subagent_sonnet: 'Sub-agents that do not pick a model run on Sonnet. Risk: weaker research and reviews.',
+  noisy_guard: 'Noisy commands are shortened. Risk: Claude may miss a line it needed.',
+  output_store: 'Long output: Claude sees only its start, its end and the errors. Risk: the middle stays hidden.',
+  handoff: 'A long chat left idle gets a note to go on in a new session. Risk: what is not in the note stays behind.',
+  unused_services: 'Tools unused for 30 days are turned off. Risk: a tool you use rarely disappears; /mcp turns it back on.',
+  write_minimum: 'Claude writes only what the task needs. Risk: fewer explanations.',
+  saved: 'An estimate of the tokens these methods saved. On a subscription plan it is not money you were charged.',
+}
+const CLICK: Record<Action['kind'], string> = {
+  bypass: 'Click: off for you for 1 hour.',
+  end: 'Click: back on.',
+  xhigh: 'Click: sessions you open in the next 10 min start at xhigh.',
+}
+export const tipOf = (c: Chip): string => {
+  const base = `${c.tone === 'dim' ? 'Off now. ' : ''}${TIPS[c.tone === 'window' ? 'window' : c.method] ?? ''}`
+  return c.action === undefined ? base : `${base} ${CLICK[c.action.kind]}`
+}
+export const tipScope = (id: string): string => `aionas-tip-${id}`
+
 const int = (s: string | undefined): number => (s !== undefined && /^[0-9]+$/.test(s) ? Number(s) : 0)
 const name = (s: string | undefined): string => (s === undefined || s === '-' ? '' : s)
 const amount = (s: string | undefined): number | null => {
@@ -314,13 +339,34 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
         <Text color="warning">{c.text}</Text>
       )
     const action = c.action
-    if (action === undefined) return body
     return (
-      <Button key={c.key} label={c.text} onPress={() => on.chip(action)}>
-        {body}
-      </Button>
+      <Box hover={{ scope: tipScope(c.method) }}>
+        {action === undefined ? (
+          body
+        ) : (
+          <Button key={c.key} label={c.text} onPress={() => on.chip(action)}>
+            {body}
+          </Button>
+        )}
+      </Box>
     )
   }
+
+  // The hover row: every tip drawn hidden, the hovered chip's revealed.
+  const tipRow = (shown: Chip[]) => (
+    <Box key="aionas-tips" flexDirection="column">
+      {f.savings !== undefined && (
+        <Box key={tipScope('saved')} display="none" hover={{ scope: tipScope('saved'), display: 'flex' }}>
+          <Text dimColor>{TIPS.saved}</Text>
+        </Box>
+      )}
+      {shown.map(c => (
+        <Box key={tipScope(c.method)} display="none" hover={{ scope: tipScope(c.method), display: 'flex' }}>
+          <Text dimColor>{tipOf(c)}</Text>
+        </Box>
+      ))}
+    </Box>
+  )
 
   const rows = []
   if (!v.isFull) {
@@ -337,7 +383,7 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
           {f.savings !== undefined && <Text dimColor> │ </Text>}
           {f.savings !== undefined && <Text>saved today </Text>}
           {f.savings !== undefined && (
-            <Text color="success" weight="bold">
+            <Text color="success" weight="bold" hover={{ scope: tipScope('saved') }}>
               {savedParts(f.savings).amount}
             </Text>
           )}
@@ -348,6 +394,7 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
         {line.more > 0 && <Text dimColor>+{line.more}</Text>}
         <Button key="aionas-more" label="More" dimColor onPress={on.more} />
       </Box>,
+      tipRow(line.chips),
     )
   } else {
     const me = f.me
@@ -370,11 +417,17 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
         {who}
       </Text>,
     )
-    if (f.savings !== undefined) rows.push(<Text key="aionas-saved">{savedFull(f.savings, f.now, f.tzOffset)}</Text>)
+    if (f.savings !== undefined)
+      rows.push(
+        <Text key="aionas-saved" hover={{ scope: tipScope('saved') }}>
+          {savedFull(f.savings, f.now, f.tzOffset)}
+        </Text>,
+      )
     rows.push(
       <Box key="aionas-chips" flexDirection="row" flexWrap="wrap" columnGap={1}>
         {chips.map(chipEl)}
       </Box>,
+      tipRow(chips),
     )
     rows.push(
       <Box key="aionas-buttons" flexDirection="row" columnGap={1}>

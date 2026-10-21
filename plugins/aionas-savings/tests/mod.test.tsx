@@ -129,7 +129,7 @@ function world(on: On, grant: string = 'high'): World {
   return w
 }
 
-const TIPS_WINDOW = 'Sessions you open before the timer ends run at xhigh. Risk: they use up your plan faster.'
+const TIPS_WINDOW = 'Sessions you open before the timer ends run at xhigh.'
 
 const scriptRuns =(w: World, script: string): string[][] => w.argv.filter(a => a.some(x => x.endsWith(script)))
 
@@ -361,7 +361,7 @@ describe('band: chips and the one-click bypass (M3)', () => {
     }
   })
 
-  test('every chip and saved today has a hidden tip revealed on hover: what it is, its risk, what a click does', async ($, on) => {
+  test('every chip and saved today has a hidden tip revealed on hover: what it is and what a click does', async ($, on) => {
     const w = world(on)
     w.methods.write_minimum = { ...(w.methods.write_minimum as M), state: 'off', active: 0 }
     await start($)
@@ -386,14 +386,14 @@ describe('band: chips and the one-click bypass (M3)', () => {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
       expect(await tip(ui, 'saved')).toContain('not money you were charged')
       expect(await tip(ui, 'noisy_guard')).toBe(
-        'Noisy commands are shortened. Risk: Claude may miss a line it needed. Click: off for you for 1 hour.',
+        'Noisy commands are shortened. Click: off for you for 1 hour.',
       )
       expect(await tip(ui, 'effort_default')).toBe(
         'New sessions start at high; max is blocked. Click: sessions you open in the next 10 min start at xhigh.',
       )
       expect(await tip(ui, 'handoff')).toMatch(/^Off now\. A long chat left idle/)
       await ui.press({ key: 'aionas-chip-noisy_guard' })
-      expect(await tip(ui, 'noisy_guard')).toMatch(/Risk: .* Click: back on\.$/)
+      expect(await tip(ui, 'noisy_guard')).toMatch(/Click: back on\.$/)
       await ui.press({ key: 'aionas-chip-noisy_guard' })
       await ui.press({ key: 'aionas-chip-effort_default' })
       expect(await tip(ui, 'effort_default')).toBe(TIPS_WINDOW)

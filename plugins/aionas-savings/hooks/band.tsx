@@ -61,18 +61,18 @@ export const CHIP_LABELS: Record<string, string> = {
   write_minimum: 'write-min',
 }
 
-// One plain sentence per chip (what it does, its risk), shown in a row under
+// One plain sentence per chip (what it does), shown in a row under
 // the band while the pointer is on the chip; `window` is the open xhigh
 // window's chip, `saved` the saved-today figure.
 export const TIPS: Record<string, string> = {
   effort_default: 'New sessions start at high; max is blocked.',
-  window: 'Sessions you open before the timer ends run at xhigh. Risk: they use up your plan faster.',
-  subagent_sonnet: 'Sub-agents that do not pick a model run on Sonnet. Risk: weaker research and reviews.',
-  noisy_guard: 'Noisy commands are shortened. Risk: Claude may miss a line it needed.',
-  output_store: 'Long output: Claude sees only its start, its end and the errors. Risk: the middle stays hidden.',
-  handoff: 'A long chat left idle gets a note to go on in a new session. Risk: what is not in the note stays behind.',
-  unused_services: 'Tools unused for 30 days are turned off. Risk: a tool you use rarely disappears; /mcp turns it back on.',
-  write_minimum: 'Claude writes only what the task needs. Risk: fewer explanations.',
+  window: 'Sessions you open before the timer ends run at xhigh.',
+  subagent_sonnet: 'Sub-agents that do not pick a model run on Sonnet.',
+  noisy_guard: 'Noisy commands are shortened.',
+  output_store: 'Long output: Claude sees only its start, its end and the errors.',
+  handoff: 'A long chat left idle gets a note to go on in a new session.',
+  unused_services: 'Tools unused for 30 days are turned off; /mcp turns one back on.',
+  write_minimum: 'Claude writes only what the task needs.',
   saved: 'An estimate of the tokens these methods saved. On a subscription plan it is not money you were charged.',
 }
 const CLICK: Record<Action['kind'], string> = {

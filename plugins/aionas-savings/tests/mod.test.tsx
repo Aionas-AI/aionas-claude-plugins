@@ -17,7 +17,7 @@ const BAND = {
     hasSurvey: false,
     isWorking: false,
     maxRows: 10,
-    bodyColumns: 200,
+    bodyColumns: 220,
     scroll: { offset: 0, bodyRows: 10 },
     view: {},
   },
@@ -34,6 +34,9 @@ type World = {
   me: string | undefined
   savings: string | undefined
   window: string
+  settings: Record<string, unknown>
+  flag: Record<string, unknown>
+  parentArgs: string
   compactAt: string
   now: number
   bandReads: () => number
@@ -74,6 +77,9 @@ function world(on: On, grant: string = 'high'): World {
     me: ME,
     savings: SAVINGS_USD,
     window: 'window\t-\t0\thigh',
+    settings: { effortLevel: 'medium', maxEffortLevel: 'high' },
+    flag: {},
+    parentArgs: '',
     compactAt: 'compact_at\t200000\t55',
     now: T0,
     bandReads: () => reads,
@@ -84,6 +90,7 @@ function world(on: On, grant: string = 'high'): World {
   on('session.id', () => ({ value: 'sess-test-1' }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('env.get', ($, e) => ({ value: env.get(e.name) }))
+  on('settings.read', ($, e) => ({ value: e.source === 'flag' ? w.flag : w.settings }) as never)
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('ui.toast', ($, e) => {
     w.toasts.push(String(e.text))
@@ -97,6 +104,7 @@ function world(on: On, grant: string = 'high'): World {
     const last = e.argv.slice(-2)
     let stdout = ''
     if (a.includes('effort-window.sh grant')) stdout = grant
+    else if (a.includes('ps -o args=')) stdout = w.parentArgs
     else if (a.includes('--band')) {
       reads += 1
       stdout = bandOut(w)
@@ -117,7 +125,7 @@ function world(on: On, grant: string = 'high'): World {
     } else if (a.includes('aionas-bypass.sh')) stdout = 'noisy_guard is off for you for 1 hour, from now. Reason: debugging a flaky test.'
     else if (a.includes('aionas-xhigh.sh')) {
       w.window = `window\txhigh\t${w.now + 600}\thigh`
-      stdout = 'Sessions you open in the next 10 minutes start at xhigh.'
+      stdout = 'Higher effort is allowed for 10 minutes: sessions you open now start at their usual level, and you may raise them to xhigh (Extra) or max with /effort.'
     }
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -129,7 +137,7 @@ function world(on: On, grant: string = 'high'): World {
   return w
 }
 
-const TIPS_WINDOW = 'Sessions you open before the timer ends may go up to xhigh or max with /effort.'
+const TIPS_WINDOW = 'Sessions you open before the timer ends may go up to xhigh or max.'
 
 const scriptRuns =(w: World, script: string): string[][] => w.argv.filter(a => a.some(x => x.endsWith(script)))
 
@@ -163,7 +171,7 @@ describe('band: one line and the full view (M1)', () => {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · Acme · mbp-noa · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
       expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard')
-      expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toContain('● high')
+      expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● medium · allow more')
       expect((await ui.find({ key: 'aionas-chip-subagent_sonnet' }))?.text).toContain('● sonnet subagents')
       expect(await ui.find({ type: 'Text', text: /^○ handoff$/ })).toBeDefined()
       expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
@@ -177,7 +185,7 @@ describe('band: one line and the full view (M1)', () => {
         await ui.find({ type: 'Text', text: 'saved since 8 Oct (13 days) ~$46.20 · today ~$3.80 · estimated · updated 13:05' }),
       ).toBeDefined()
       expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard · 4 today')
-      expect(await ui.find({ key: 'aionas-xhigh' })).toBeDefined()
+      expect((await ui.find({ key: 'aionas-xhigh' }))?.props.label).toBe('allow higher effort for 10 min')
       expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
 
       await ui.press({ key: 'aionas-less' })
@@ -231,16 +239,16 @@ describe('band: one line and the full view (M1)', () => {
     world(on)
     await start($)
     for (const surface of SURFACES) {
-      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 194 } })
+      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 209 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · mbp-noa · subscription │/ })).toBeDefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 193 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 208 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · subscription │/ })).toBeDefined()
       expect(await ui.find({ text: /mbp-noa/ })).toBeUndefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 179 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 194 } })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct/ })).toBeDefined()
       expect(await ui.find({ text: /Acme/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeDefined()
@@ -381,7 +389,7 @@ describe('band: chips and the one-click bypass (M3)', () => {
     }
   })
 
-  test('the effort chip opens the xhigh window; it counts down every 15 s with a dim second line', async ($, on) => {
+  test('the effort chip opens the window that allows higher effort; it counts down every 15 s with a dim second line', async ($, on) => {
     const w = world(on)
     const clock = w.clock
     await start($)
@@ -390,21 +398,26 @@ describe('band: chips and the one-click bypass (M3)', () => {
       await ui.press({ key: 'aionas-chip-effort_default' })
       const xhigh = scriptRuns(w, 'commands/aionas-xhigh.sh')
       expect(xhigh.at(-1)?.slice(-1)[0]).toMatch(/commands\/aionas-xhigh\.sh$/)
-      expect(await ui.find({ type: 'Text', text: '◆ xhigh window 10:00 left' })).toBeDefined()
+      expect(w.toasts.at(-1)).toContain('you may raise them to xhigh (Extra) or max with /effort')
+      expect(await ui.find({ type: 'Text', text: '◆ higher effort allowed · 10:00 left' })).toBeDefined()
       expect(
-        await ui.find({ type: 'Text', text: 'new sessions in the next 10 min start at xhigh · this session stays high' }),
+        await ui.find({
+          type: 'Text',
+          text: 'sessions you open in the next 10 min may use /effort xhigh (Extra) or max · this one stays at high or below',
+        }),
       ).toBeDefined()
+      expect(await ui.find({ text: /start at xhigh|xhigh window/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-effort_default' })).toBeUndefined()
       const reads = w.bandReads()
       w.now += 15
       await clock.advance(15_000)
       expect(w.bandReads()).toBeGreaterThan(reads)
-      expect(await ui.find({ type: 'Text', text: '◆ xhigh window 9:45 left' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '◆ higher effort allowed · 9:45 left' })).toBeDefined()
       w.window = 'window\t-\t0\thigh'
       w.now += 600
       await clock.advance(15_000)
-      expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toContain('● high')
-      expect(await ui.find({ text: /new sessions in the next/ })).toBeUndefined()
+      expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● medium · allow more')
+      expect(await ui.find({ text: /sessions you open in the next/ })).toBeUndefined()
       await ui.unmount()
     }
   })
@@ -437,7 +450,7 @@ describe('band: chips and the one-click bypass (M3)', () => {
         'Noisy commands are shortened. Click: off for you for 1 hour.',
       )
       expect(await tip(ui, 'effort_default')).toBe(
-        'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max with /effort.',
+        'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max.',
       )
       expect(await tip(ui, 'handoff')).toMatch(/^Off now\. A long chat left idle/)
       await ui.press({ key: 'aionas-chip-noisy_guard' })
@@ -455,12 +468,35 @@ describe('band: chips and the one-click bypass (M3)', () => {
     }
   })
 
-  test('a session opened in a window says so', async ($, on) => {
+  test('a session opened in a window says it may go higher, then the level it was raised to', async ($, on) => {
     const w = world(on, 'xhigh')
     w.window = `window\txhigh\t${T0 + 300}\txhigh`
+    on('command.run', { command: 'effort' }, () => ({ text: 'engine' }))
     await start($)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-    expect(await ui.find({ type: 'Text', text: 'new sessions in the next 5 min start at xhigh · this session is xhigh' })).toBeDefined()
+    expect(
+      await ui.find({ type: 'Text', text: 'sessions you open in the next 5 min may use /effort xhigh (Extra) or max · this one may too' }),
+    ).toBeDefined()
+    await $.command.run({ command: 'effort', args: 'max' } as never)
+    expect(
+      await ui.find({ type: 'Text', text: 'sessions you open in the next 5 min may use /effort xhigh (Extra) or max · this one is at max' }),
+    ).toBeDefined()
+  })
+
+  test('the effort chip shows the level the last main-loop request carried, else the settings level, else medium', async ($, on) => {
+    const w = world(on, 'xhigh')
+    bottomStep(on, w, [])
+    on('command.run', { command: 'effort' }, () => ({ text: 'engine' }))
+    w.settings = { effortLevel: 'low' }
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● low · allow more')
+    await step($, 'high')
+    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● high · allow more')
+    await step($, 'low', 'agent-1')
+    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● high · allow more')
+    await $.command.run({ command: 'effort', args: 'max' } as never)
+    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● max · allow more')
   })
 
   test('the band refreshes every 30 s and after a main-loop turn', async ($, on) => {
@@ -550,7 +586,7 @@ describe('commands', () => {
     world(on)
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
     const r = await $.command.run({ command: 'aionas-xhigh', args: 'max because' } as never)
-    expect(r.text).toContain('Sessions you open in the next 10 minutes start at')
+    expect(r.text).toContain('Higher effort is allowed for 10 minutes')
   })
 })
 
@@ -603,22 +639,97 @@ describe('effort grant', () => {
     expect(w.envSets).toEqual([])
   })
 
-  test('a session opened in an xhigh window sends xhigh, then max after /effort max, and puts the env back', async ($, on) => {
+  test('a session opened in a window starts at its usual level; /effort max, xhigh raise it; /effort high goes back to Claude Code', async ($, on) => {
     const w = world(on, 'xhigh')
     const seen: (string | undefined)[] = []
     bottomStep(on, w, seen)
+    const engine: string[] = []
+    on('command.run', { command: 'effort' }, ($, e) => {
+      engine.push(e.args)
+      return { text: 'engine' }
+    })
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
-    await step($, 'high')
+    await step($, 'medium')
+    expect(seen).toEqual([undefined])
+    expect(w.envSets).toEqual([])
     const r = await $.command.run({ command: 'effort', args: 'max' } as never)
     expect(r.text).toContain('Set effort level to max')
     await step($, 'high')
     await step($, 'high', 'agent-1')
+    await $.command.run({ command: 'effort', args: 'xhigh' } as never)
+    await step($, 'high')
+    await $.command.run({ command: 'effort', args: 'high' } as never)
+    await step($, 'high')
     expect(seen).toEqual([
-      '{"output_config":{"effort":"xhigh"}}',
+      undefined,
       '{"output_config":{"effort":"max"}}',
       undefined,
+      '{"output_config":{"effort":"xhigh"}}',
+      undefined,
     ])
+    expect(engine).toEqual(['high'])
     expect(w.envSets.at(-1)).toBeUndefined()
+  })
+})
+
+describe('effort grant: the app\'s picker (AIO-868, option 1)', () => {
+  const APP = '/Applications/Claude.app/claude --output-format stream-json --effort=max --model=claude-opus-5-5'
+
+  for (const [label, grant, args, want] of [
+    ['in a window, launched at Max: sends max', 'xhigh', APP, '{"output_config":{"effort":"max"}}'],
+    ['in a window, launched at Extra: sends xhigh', 'xhigh', APP.replace('--effort=max', '--effort xhigh'), '{"output_config":{"effort":"xhigh"}}'],
+    ['in a window, launched at Medium: sends nothing extra', 'xhigh', APP.replace('--effort=max', '--effort=medium'), undefined],
+    ['outside a window, launched at Max: sends nothing extra', 'high', APP, undefined],
+  ] as const) {
+    test(`the app's launch-time picker: ${label}`, async ($, on) => {
+      const w = world(on, grant)
+      w.parentArgs = args
+      const seen: (string | undefined)[] = []
+      bottomStep(on, w, seen)
+      await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+      await step($, 'high')
+      expect(seen).toEqual([want])
+    })
+  }
+
+  test('in a window session, the picker moved to Extra mid-session raises the next request; moved to Low or High drops it', async ($, on) => {
+    const w = world(on, 'xhigh')
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await step($, 'medium')
+    w.flag = { effortLevel: 'xhigh' }
+    await step($, 'high')
+    await step($, 'high')
+    w.flag = { effortLevel: 'low' }
+    await step($, 'low')
+    expect(seen).toEqual([undefined, '{"output_config":{"effort":"xhigh"}}', '{"output_config":{"effort":"xhigh"}}', undefined])
+  })
+
+  test('the latest choice wins: /effort max after the picker, then the picker again', async ($, on) => {
+    const w = world(on, 'xhigh')
+    w.flag = { effortLevel: 'xhigh' }
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await step($, 'high')
+    await $.command.run({ command: 'effort', args: 'max' } as never)
+    await step($, 'high')
+    w.flag = { effortLevel: 'high' }
+    await step($, 'high')
+    expect(seen).toEqual(['{"output_config":{"effort":"xhigh"}}', '{"output_config":{"effort":"max"}}', undefined])
+  })
+
+  test('outside a window the picker is never read and nothing is sent above the cap', async ($, on) => {
+    const w = world(on, 'high')
+    w.flag = { effortLevel: 'xhigh' }
+    w.parentArgs = APP
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await step($, 'high')
+    expect(seen).toEqual([undefined])
+    expect(w.argv.some(a => a.join(' ').includes('ps -o args='))).toBe(false)
   })
 })
 

@@ -3,10 +3,11 @@
 # The plugin's mod (hooks/mod.tsx) registers the slash command and runs this
 # script by argument vector (no shell).
 #
-# Opens a 10-minute window: sessions OPENED in it start at xhigh (or at max
-# with "max") and may move between xhigh and max with /effort for their whole
-# life. Sessions already open do not change. After the window new sessions
-# start at high with the cap at high again. The window is a self-override of
+# Opens a 10-minute window: sessions OPENED in it start at their usual level
+# and MAY be raised to xhigh or max with /effort for their whole life (AIO-868:
+# the window allows, it never sets a level). Sessions already open do not
+# change. After the window new sessions are capped at high again ("max" only
+# names the level recorded with Aionas). The window is a self-override of
 # effort_default (reason optional, from/until, params {"effort": level}); when
 # the org admin blocked self-override it is sent for approval instead and
 # opens at the next session start after it is approved.
@@ -41,7 +42,7 @@ open_window() { # STATUS ID
   return 0
 }
 opened() { # SUFFIX
-  echo "Sessions you open in the next 10 minutes start at $level (and can go up to max with /effort). This session stays as it is.$why$1"
+  echo "Higher effort is allowed for 10 minutes: sessions you open now start at their usual level, and you may raise them to xhigh (Extra) or max with /effort. This session stays as it is.$why$1"
 }
 
 body="$dir/.xhigh.body.$$"
@@ -58,7 +59,7 @@ if [ $rc -eq 0 ]; then
   rm -f "$body"
   if [ "$status" = requested ]; then
     [ "$id" != - ] && aionas_effort_request_add "$id" "$level"
-    echo "effort $level: sent for approval to your org admin or lead.$why New sessions stay at high; once it is approved, your next new session opens the window."
+    echo "effort $level: sent for approval to your org admin or lead.$why New sessions stay capped at high; once it is approved, your next new session opens the window."
     exit 0
   fi
   open_window self "$id" || { echo "Could not write the window."; exit 1; }
@@ -98,7 +99,7 @@ if [ $allowed -eq 1 ]; then
   exit 0
 fi
 if [ $queued -eq 1 ]; then
-  echo "effort $level: your organization asks for approval. Aionas could not be reached; the request is sent for approval at your next session start. New sessions stay at high."
+  echo "effort $level: your organization asks for approval. Aionas could not be reached; the request is sent for approval at your next session start. New sessions stay capped at high."
   exit 0
 fi
 echo "effort $level: your organization asks for approval, and Aionas could not be reached. Nothing changed; try again later."

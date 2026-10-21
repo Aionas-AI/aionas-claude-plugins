@@ -7,7 +7,7 @@ The Claude Code marketplace `aionas`. It has one plugin, `aionas-savings`.
 This plugin applies your organization's Aionas savings policy on this computer. It is the client half of the savings methods (wave 24):
 
 - the handoff document,
-- starting sessions at high effort, with the `/aionas-xhigh` window,
+- effort capped at high, with the `/aionas-xhigh` window that allows xhigh or max for sessions opened in the next 10 minutes,
 - the noisy-command guard and the long-output store,
 - the "write the minimum" skill.
 

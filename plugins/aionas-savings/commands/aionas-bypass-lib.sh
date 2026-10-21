@@ -270,6 +270,7 @@ aionas_band_policy() {
     function name(k) { return (k in ty && ty[k] == "s") ? clean(decode(va[k])) : "-" }
     function num(k) { return (k in ty && ty[k] == "n" && va[k] ~ /^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$/) ? va[k] : "-" }
     function uint(k) { return (k in ty && ty[k] == "n" && va[k] ~ /^[0-9]+$/ && length(va[k]) <= 15) ? va[k] : 0 }
+    function sint(k) { return (k in ty && ty[k] == "n" && va[k] ~ /^-?[0-9]+$/ && length(va[k]) <= 16) ? va[k] : "-" }
     $1 ~ /^(me|savings)(\.|$)/ { ty[$1] = $2; va[$1] = $3 }
     END {
       if (ty["me"] == "o" && name("me.display_name") != "-")
@@ -277,7 +278,7 @@ aionas_band_policy() {
       mk = (ty["savings.money_kind"] == "s") ? va["savings.money_kind"] : ""
       if (ty["savings"] == "o" && (mk == "usd" || mk == "api_value")) {
         d = (ty["savings.since_on_date"] == "s" && va["savings.since_on_date"] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) ? va["savings.since_on_date"] : "-"
-        printf "savings\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mk, num("savings.today_usd"), num("savings.since_on_usd"), uint("savings.today_tokens"), uint("savings.since_on_tokens"), d, name("savings.as_of")
+        printf "savings\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mk, num("savings.today_usd"), num("savings.since_on_usd"), sint("savings.today_tokens"), sint("savings.since_on_tokens"), d, num("savings.could_save_usd"), sint("savings.could_save_tokens"), sint("savings.counted_days"), name("savings.as_of")
       }
     }')
   [ -n "$_bp" ] || return 0

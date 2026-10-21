@@ -146,8 +146,9 @@ test_xhigh_self_opens_a_10_minute_window_with_reason() {
   t_enroll; export AIONAS_NOW=$T0; answer 201 self ovr_x
   local out; out=$(bash "$XHIGH" big refactor)
   t_eq 0 $?
-  t_contains "$out" "Sessions you open in the next 10 minutes start at xhigh"
+  t_contains "$out" "Higher effort is allowed for 10 minutes: sessions you open now start at their usual level, and you may raise them to xhigh (Extra) or max with /effort."
   t_contains "$out" "This session stays as it is."
+  t_lacks "$out" "start at xhigh"
   t_eq '{"method_id":"effort_default","duration_seconds":600,"params":{"effort":"xhigh"},"reason":"big refactor"}' "$(t_call 1 body)"
   t_eq "$(printf '%s\t%s\txhigh\tself\tovr_x' $T0 $((T0 + 600)))" "$(cat "$(aionas_savings_dir)/effort-window")"
 }
@@ -155,7 +156,8 @@ test_xhigh_self_opens_a_10_minute_window_with_reason() {
 test_xhigh_max_without_reason() {
   t_enroll; answer 201 self ovr_m
   local out; out=$(bash "$XHIGH" max)
-  t_contains "$out" "start at max"
+  t_contains "$out" "you may raise them to xhigh (Extra) or max with /effort"
+  t_lacks "$out" "start at max"
   t_eq '{"method_id":"effort_default","duration_seconds":600,"params":{"effort":"max"}}' "$(t_call 1 body)"
 }
 
@@ -163,6 +165,7 @@ test_xhigh_blocked_is_sent_for_approval_and_opens_no_window() {
   t_enroll; blocked_policy effort_default; answer 202 requested ovr_r
   local out; out=$(bash "$XHIGH" max please)
   t_contains "$out" "sent for approval"
+  t_contains "$out" "New sessions stay capped at high"
   t_not test -f "$(aionas_savings_dir)/effort-window"
   t_contains "$(cat "$(aionas_savings_dir)/effort-requests.tsv")" "$(printf 'ovr_r\tmax')"
 }

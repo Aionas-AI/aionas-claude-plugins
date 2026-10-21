@@ -8,9 +8,9 @@
 #   bash tests/e2e/claude-p.sh        (needs npx, python3, the npm registry)
 #
 # Checks: the slash commands run without a model turn and record overrides
-# (reason / no reason / sent for approval); an /aionas-xhigh window makes the
-# NEXT session's requests carry xhigh/max while the settings stay at high; an
-# ended window gives the default again; the policy sync calls the gateway;
+# (reason / no reason / sent for approval); an /aionas-xhigh window lets the
+# NEXT session go up to max with /effort (it still starts at the default) while
+# the settings stay at high; an ended window gives the default again; the policy sync calls the gateway;
 # the plugin adds at most a few seconds to `claude -p` with the gateway
 # black-holed (W24-P2).
 set -u
@@ -48,6 +48,12 @@ cc() { # [--no-plugin] PROMPT -> stdout
   if [ "$1" = --no-plugin ]; then shift; else args+=(--plugin-dir "$PLUGIN"); fi
   (cd "$work" && perl -e 'alarm 120; exec @ARGV' npx -y "@anthropic-ai/claude-code@$CC_VERSION" "${args[@]}" "$1" </dev/null 2>"$ROOT/err")
 }
+cc2() { # MESSAGE... -> one plugin session, one stream-json line per message
+  local m
+  for m in "$@"; do printf '{"type":"user","message":{"role":"user","content":"%s"}}\n' "$m"; sleep 6; done |
+    (cd "$work" && perl -e 'alarm 120; exec @ARGV' npx -y "@anthropic-ai/claude-code@$CC_VERSION" -p --model claude-opus-5-5 \
+      --plugin-dir "$PLUGIN" --input-format stream-json --output-format stream-json --verbose 2>"$ROOT/err")
+}
 efforts() { grep '"/v1/messages' "$LOG" | grep '"stream": true' | sed -n 's/.*"output_config": {"effort": "\([a-z]*\)"}.*/\1/p'; }
 mark() { wc -l <"$LOG" | tr -d ' '; }
 since() { sed -n "$(($1 + 1)),\$p" "$LOG"; }
@@ -71,10 +77,13 @@ m=$(mark); cc "hi" >/dev/null; base=$(since "$m" | grep '"stream": true' | sed -
 printf 'INFO default session effort sent: %s\n' "${base:-none}"
 case "$base" in xhigh | max) bad "default session above high: $base" ;; *) pass "default session not above high ($base)" ;; esac
 out=$(cc "/aionas-xhigh max trying the window")
-case "$out" in *"Sessions you open in the next 10 minutes start at max"*) pass "xhigh window opened" ;; *) bad "xhigh: $out" ;; esac
+case "$out" in *"Higher effort is allowed for 10 minutes"*) pass "xhigh window opened" ;; *) bad "xhigh: $out" ;; esac
 m=$(mark); cc "hi" >/dev/null
 e=$(since "$m" | grep '"stream": true' | sed -n 's/.*"effort": "\([a-z]*\)".*/\1/p' | head -1)
-[ "$e" = max ] && pass "new session in the window sends max" || bad "new session in the window sent: ${e:-none}"
+[ "$e" = "$base" ] && pass "new session in the window starts at the default ($e)" || bad "new session in the window sent: ${e:-none} (default $base)"
+m=$(mark); cc2 "/effort max" "hi" >/dev/null
+e=$(since "$m" | grep '"stream": true' | sed -n 's/.*"effort": "\([a-z]*\)".*/\1/p' | head -1)
+[ "$e" = max ] && pass "/effort max in a window session sends max" || bad "/effort max in the window sent: ${e:-none}"
 t=$(cat "$CLAUDE_CONFIG_DIR/settings.json")
 [ "$t" = '{"effortLevel":"high","maxEffortLevel":"high"}' ] && pass "settings stay at high/high" || bad "settings changed: $t"
 w="$HOME/.aionas/agent/savings/effort-window"

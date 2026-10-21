@@ -14,7 +14,8 @@
 #                                separated, numbers and names only, no network:
 #       clock <now> <utc offset seconds>
 #       me <display_name> <org_name> <role> <lead_name|-> <computer_name|->
-#       savings <usd|api_value> <today_usd|-> <since_on_usd|-> <today_tokens> <since_on_tokens> <since_on_date|-> <as_of_epoch|0>
+#       savings <usd|api_value> <today_usd|-> <since_on_usd|-> <today_tokens|-> <since_on_tokens|-> <since_on_date|-> <could_save_usd|-> <could_save_tokens|-> <counted_days|-> <as_of_epoch|0>
+#                                (AIO-867: amounts may be negative, regressions net; "-" is no data)
 #       method <id> <on|off> <active> <self_override> <released> <bypass_until|0> <request_pending> <fired_today>
 #       window <xhigh|max|-> <until|0> <session_grant|->
 #       compact_at <tokens> <idle_minutes>

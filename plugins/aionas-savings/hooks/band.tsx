@@ -65,7 +65,7 @@ export const CHIP_LABELS: Record<string, string> = {
 // the band while the pointer is on the chip; `window` is the open xhigh
 // window's chip, `saved` the saved-today figure.
 export const TIPS: Record<string, string> = {
-  effort_default: 'New sessions start at high; max is blocked.',
+  effort_default: 'New sessions start at medium; high is the most you can pick.',
   window: 'Sessions you open before the timer ends run at xhigh.',
   subagent_sonnet: 'Sub-agents that do not pick a model run on Sonnet.',
   noisy_guard: 'Noisy commands are shortened.',

@@ -389,7 +389,7 @@ describe('band: chips and the one-click bypass (M3)', () => {
         'Noisy commands are shortened. Click: off for you for 1 hour.',
       )
       expect(await tip(ui, 'effort_default')).toBe(
-        'New sessions start at high; max is blocked. Click: sessions you open in the next 10 min start at xhigh.',
+        'New sessions start at medium; high is the most you can pick. Click: sessions you open in the next 10 min start at xhigh.',
       )
       expect(await tip(ui, 'handoff')).toMatch(/^Off now\. A long chat left idle/)
       await ui.press({ key: 'aionas-chip-noisy_guard' })

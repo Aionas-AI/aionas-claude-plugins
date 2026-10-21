@@ -52,7 +52,7 @@ export type Chip = {
 // Short chip labels (spec §3.1); cache_alert, seat_fit and cache_guard never
 // get a chip.
 export const CHIP_LABELS: Record<string, string> = {
-  effort_default: 'high',
+  effort_default: 'medium',
   subagent_sonnet: 'sonnet subagents',
   noisy_guard: 'guard',
   output_store: 'store',
@@ -201,7 +201,7 @@ export const chipsOf = (
   opts: { isFull: boolean; sessionLevel: string | undefined; contextTokens: number },
 ): Chip[] =>
   f.methods.map(m => {
-    const base = m.id === 'effort_default' ? (opts.sessionLevel ?? 'high') : (CHIP_LABELS[m.id] as string)
+    const base = m.id === 'effort_default' ? (opts.sessionLevel ?? CHIP_LABELS.effort_default) : (CHIP_LABELS[m.id] as string)
     const key = `aionas-chip-${m.id}`
     const chip = (text: string, tone: Chip['tone'], action?: Action['kind']): Chip => ({
       method: m.id,
@@ -211,7 +211,7 @@ export const chipsOf = (
       action: action === undefined ? undefined : { kind: action, method: m.id },
     })
     if (m.id === 'effort_default' && isWindowOpen(f))
-      return chip(`◆ ${f.window.level ?? 'xhigh'} window ${mss(f.window.until - f.now)} left`, 'window')
+      return chip(`◆ higher effort allowed · ${mss(f.window.until - f.now)} left`, 'window')
     if (m.isReleased) return chip(`○ ${base} · released`, 'dim')
     if (m.state === 'off') return chip(`○ ${base}`, 'dim')
     if (!m.isActive) {
@@ -225,7 +225,9 @@ export const chipsOf = (
       if (m.id === 'handoff') extra = ` · ${fmtTokens(opts.contextTokens)}`
       else if (m.id !== 'effort_default' && m.firedToday > 0) extra = ` · ${m.firedToday} today`
     }
-    return chip(`● ${base}${extra}`, 'on', m.id === 'effort_default' ? 'xhigh' : 'bypass')
+    // The effort chip's press asks for the window, so it says so (AIO-868).
+    if (m.id === 'effort_default') return chip(`● ${base} · allow more`, 'on', 'xhigh')
+    return chip(`● ${base}${extra}`, 'on', 'bypass')
   })
 
 // "saved today <amount><tail>": the amount drawn strong, the rest plain/dim.
@@ -297,6 +299,7 @@ export type View = {
   isWorking: boolean
   columns: number
   sessionLevel: string | undefined
+  isGranted: boolean
   contextTokens: number
   contextWindow: number
   laterAt: number
@@ -431,7 +434,7 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
     )
     rows.push(
       <Box key="aionas-buttons" flexDirection="row" columnGap={1}>
-        {!isWindowOpen(f) && <Button key="aionas-xhigh" label="xhigh for 10 min" onPress={on.xhigh} />}
+        {!isWindowOpen(f) && <Button key="aionas-xhigh" label="allow higher effort for 10 min" onPress={on.xhigh} />}
         <Button key="aionas-less" label="Less" dimColor onPress={on.less} />
       </Box>,
     )
@@ -439,10 +442,14 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
 
   if (isWindowOpen(f)) {
     const minutes = Math.max(1, Math.ceil((f.window.until - f.now) / 60))
-    const self = v.sessionLevel === 'xhigh' || v.sessionLevel === 'max' ? `is ${v.sessionLevel}` : 'stays high'
+    const self = !v.isGranted
+      ? 'stays at high or below'
+      : v.sessionLevel === 'xhigh' || v.sessionLevel === 'max'
+        ? `is at ${v.sessionLevel}`
+        : 'may too'
     rows.push(
       <Text key="aionas-window" dimColor>
-        new sessions in the next {String(minutes)} min start at {f.window.level ?? 'xhigh'} · this session {self}
+        sessions you open in the next {String(minutes)} min may use /effort xhigh (Extra) or max · this one {self}
       </Text>,
     )
   }

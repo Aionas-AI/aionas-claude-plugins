@@ -9,8 +9,10 @@
 #                                 its whole life (resume, reload):
 #                                   high   effort_default applies (the
 #                                          settings cap, high, holds)
-#                                   xhigh  opened in an xhigh window: start at
-#                                   max    xhigh / max, may move up to max
+#                                   xhigh  opened in a window: the session
+#                                   max    starts at its usual level and MAY
+#                                          go to xhigh or max with /effort
+#                                          (AIO-868: allowed, never set)
 #                                   free   effort_default is off, released or
 #                                          bypassed: no cap from Aionas
 #
@@ -21,13 +23,13 @@
 #      settings at once (hot reload).
 # So the window never touches settings.json: writing maxEffortLevel=max would
 # raise every open session, and restoring high would clamp the window's own
-# sessions. Instead the settings stay at effortLevel=high, maxEffortLevel=high
-# and env CLAUDE_CODE_EFFORT_LEVEL=high (the install's start-at-high pin: on
-# 2.1.299 effortLevel alone loses to a per-model /effort entry), and the mod
-# gives a granted session its level per request through
-# CLAUDE_CODE_EXTRA_BODY ({"output_config":{"effort":...}}), which Claude Code
-# documents as not clamped by maxEffortLevel. "Restores high after expiry" is
-# therefore this hook dropping the ended window: new sessions are high again.
+# sessions. Instead the settings keep maxEffortLevel=high, and when the person
+# picks xhigh or max with /effort in a granted session, the mod sends that
+# level per request through CLAUDE_CODE_EXTRA_BODY
+# ({"output_config":{"effort":...}}), which Claude Code documents as not
+# clamped by maxEffortLevel. Nothing is sent above the usual level until the
+# person asks (tests/probe/effort-sent-probe.sh). "Back to the cap after
+# expiry" is this hook dropping the ended window.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
 . "$AIONAS_PLUGIN_ROOT/commands/aionas-bypass-lib.sh" 2>/dev/null || exit 0

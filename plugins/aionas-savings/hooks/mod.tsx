@@ -4,19 +4,21 @@
 //   no mod in 2.1.299), drawn by hooks/band.tsx per the wave-24 mod spec: one
 //   line by default with More (M1), per-method chips whose one click bypasses
 //   that method for 1 hour or ends my bypass (M3), the effort chip with the
-//   xhigh window's countdown, and the warning row with /compact above
+//   higher-effort window's countdown, and the warning row with /compact above
 //   compact_at. /compact runs only when pressed: never automatically. No
 //   thumbs up/down and no "pause all" in this wave (W24-5, M3).
 // - The slash commands /aionas-bypass and /aionas-xhigh, answered here without
 //   a model turn; the work is done by commands/*.sh, run by argument vector
 //   (no shell), so nothing the person types is ever parsed by a shell.
-// - The effort grant of W24-3: a session opened in an /aionas-xhigh window
-//   (or while effort_default is off for the person) gets its level per main-
-//   loop request through CLAUDE_CODE_EXTRA_BODY, set just before the request
-//   and put back right after it, so tools and subagents never inherit it.
-//   Every other session is left to the settings cap (maxEffortLevel=high)
-//   and the install's start-at-high pin (CLAUDE_CODE_EFFORT_LEVEL=high),
-//   which /effort moves for the session it is typed in.
+// - The effort grant of W24-3, which ALLOWS and never sets a level (AIO-868):
+//   a session opened in an /aionas-xhigh window (or while effort_default is
+//   off for the person) starts at its usual level; when the person picks
+//   xhigh or max with /effort, that level goes on each main-loop request
+//   through CLAUDE_CODE_EXTRA_BODY, set just before the request and put back
+//   right after it, so tools and subagents never inherit it. Every other
+//   session is left to the settings cap (maxEffortLevel=high); an older
+//   install's pin (CLAUDE_CODE_EFFORT_LEVEL) is moved by /effort for the
+//   session it is typed in.
 // - The "write the minimum" skill expands to a no-op when the method is off.
 //
 // Privacy (W24-4): nothing here sends anything; the scripts send only method
@@ -68,6 +70,10 @@ const st = {
   bash: 'bash',
   grant: Promise.resolve<Grant>('high'),
   chosen: undefined as Level | undefined,
+  // The level the band shows: the last main-loop request's, else the level
+  // the session starts at (an older install's pin, else effortLevel).
+  sent: undefined as string | undefined,
+  start: undefined as string | undefined,
   baseExtra: undefined as string | undefined,
   baseUrl: undefined as string | undefined,
   facts: undefined as Facts | undefined,
@@ -123,10 +129,26 @@ function refresh($: EngineInterface): Promise<void> {
 
 async function readGrant($: EngineInterface): Promise<Grant> {
   const r = await run($, [script($.plugin.root, 'hooks/effort-window.sh'), 'grant', st.sid])
-  const g = parseGrant(r.out)
-  st.chosen = g === 'xhigh' || g === 'max' ? g : undefined
-  return g
+  st.chosen = undefined
+  return parseGrant(r.out)
 }
+
+async function readStart($: EngineInterface): Promise<void> {
+  const pin = await $.env.get('CLAUDE_CODE_EFFORT_LEVEL')
+  let level = pin
+  if (level === undefined) {
+    try {
+      const v = (await $.settings.read()).effortLevel
+      level = typeof v === 'string' ? v : undefined
+    } catch {
+      level = undefined
+    }
+  }
+  st.start = level
+  $.ui.invalidate('ui.render')
+}
+
+const shownLevel = (): string | undefined => st.chosen ?? st.sent ?? st.start
 
 async function press($: EngineInterface, a: Action): Promise<void> {
   const r =
@@ -155,7 +177,7 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'aionas-xhigh',
-      description: 'Aionas: sessions you open in the next 10 minutes start at xhigh (or max)',
+      description: 'Aionas: for 10 minutes, sessions you open may go up to xhigh or max with /effort',
       argumentHint: '[max] [reason]',
     })
     st.sid = await $.session.id()
@@ -165,7 +187,9 @@ export const register: Register = on => {
     st.baseUrl = await $.env.get('ANTHROPIC_BASE_URL')
     // Not awaited: the session never waits on a process; a request waits only
     // in the rare case it is sent before the grant is read.
+    st.sent = undefined
     st.grant = readGrant($)
+    void readStart($)
     st.listed = refresh($)
     st.tick?.cancel()
     st.tick = undefined
@@ -178,6 +202,10 @@ export const register: Register = on => {
   // as soon as the request is sent and answered.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined || e.effort === undefined) return yield* next(e)
+    if (typeof e.effort === 'string' && e.effort !== st.sent) {
+      st.sent = e.effort
+      $.ui.invalidate('ui.render')
+    }
     await st.grant
     if (st.chosen === undefined) return yield* next(e)
     const body = withEffort(st.baseExtra, st.chosen)
@@ -205,9 +233,13 @@ export const register: Register = on => {
     const level = (splitArgs(e.args)[0] ?? '').toLowerCase()
     if (g !== 'high' && (level === 'xhigh' || level === 'max')) {
       st.chosen = level
+      $.ui.invalidate('ui.render')
       return { text: `Set effort level to ${level} (this session only; opened in an Aionas window).` }
     }
-    if (g !== 'high' && ['low', 'medium', 'high', 'auto'].includes(level)) st.chosen = undefined
+    if (g !== 'high' && ['low', 'medium', 'high', 'auto'].includes(level)) {
+      st.chosen = undefined
+      $.ui.invalidate('ui.render')
+    }
     if (EFFORT_ARGS.includes(level) && (await $.env.get('CLAUDE_CODE_EFFORT_LEVEL')) !== undefined) {
       await $.env.set('CLAUDE_CODE_EFFORT_LEVEL', level === 'auto' ? undefined : level)
     }
@@ -271,7 +303,8 @@ export const register: Register = on => {
         isFull: st.isFull,
         isWorking: e.props.isWorking,
         columns: e.props.bodyColumns,
-        sessionLevel: st.chosen,
+        sessionLevel: shownLevel(),
+        isGranted: (await st.grant) !== 'high',
         contextTokens: st.contextTokens,
         contextWindow: st.contextWindow,
         laterAt: st.laterAt,

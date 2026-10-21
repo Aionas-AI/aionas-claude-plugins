@@ -55,7 +55,7 @@ check(last(1).startswith("[aionas-guard: capped cat_cap at about 1500 tokens: ke
       "cat big.log: capped, guard marker last")
 t = by.get(2, {}).get("text", "")
 check(t.count("ERROR") == 3 and "INFO" not in t and not by[2]["is_error"], "aionas-recall <id> --grep ERROR: only the matching lines")
-check(last(3).startswith("[aionas-store: kept 40+40 of 300 lines, id=out_") and len(by[3]["text"].splitlines()) == 81,
+check(last(3).startswith("[aionas-store: kept 40+40 of 300 lines (about ") and len(by[3]["text"].splitlines()) == 81,
       "./gen.sh: head 40 + tail 40 + store marker")
 check(by.get(4, {}).get("bytes", 0) >= raw("./gen.sh") and "aionas-" not in by[4]["text"], "AIONAS_FULL=1 ./gen.sh: full output, no marker")
 check(by.get(5, {}).get("command") == "git log" and 0 < len(by[5]["text"].splitlines()) <= 30 and "Author:" not in by[5]["text"],

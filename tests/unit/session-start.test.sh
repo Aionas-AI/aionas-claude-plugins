@@ -139,9 +139,11 @@ test_session_start_drops_an_ended_window_and_never_writes_settings() {
   t_ok test -f "$(aionas_savings_dir)/effort-window"
 }
 
+# fake_scanner [DIR]: a scanner in ~/.aionas/agent/DIR (default bin).
 fake_scanner() {
-  mkdir -p "$HOME/.aionas/agent/bin"
-  local s="$HOME/.aionas/agent/bin/aionas-scan"
+  local d="${1:-bin}"
+  mkdir -p "$HOME/.aionas/agent/$d"
+  local s="$HOME/.aionas/agent/$d/aionas-scan"
   printf '#!/bin/sh\necho "$@" >>"%s/scan.log"\n' "$HOME" >"$s"
   chmod +x "$s"
 }
@@ -159,6 +161,17 @@ test_daily_scan_runs_incremental_once_a_day() {
   local i; for i in 1 2 3 4 5 6 7 8 9 10; do [ "$(wc -l <"$HOME/scan.log" | tr -d ' ')" = 2 ] && break; sleep 0.1; done
   t_eq 2 "$(wc -l <"$HOME/scan.log" | tr -d ' ')"
   t_eq 0 "$(t_calls)"
+}
+
+test_daily_scan_finds_the_scanner_in_tools_first_then_bin() {
+  t_enroll; export AIONAS_NOW=$T0
+  fake_scanner tools
+  mkdir -p "$HOME/.aionas/agent/bin"
+  printf '#!/bin/sh\necho bin >>"%s/scan.log"\n' "$HOME" >"$HOME/.aionas/agent/bin/aionas-scan"
+  chmod +x "$HOME/.aionas/agent/bin/aionas-scan"
+  hook daily-scan.sh
+  t_ok wait_for "$HOME/scan.log"
+  t_eq "--incremental" "$(cat "$HOME/scan.log")" "tools/ must win over bin/"
 }
 
 test_daily_scan_returns_at_once_while_the_scanner_runs() {

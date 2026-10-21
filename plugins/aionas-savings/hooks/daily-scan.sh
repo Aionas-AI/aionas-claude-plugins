@@ -7,7 +7,8 @@
 # runs on a computer that is not enrolled or has no scanner installed.
 #
 # The scanner is looked up as: $AIONAS_SCAN_BIN, then
-# ~/.aionas/agent/bin/aionas-scan (aionas-scan.exe on Windows), then PATH.
+# ~/.aionas/agent/tools/aionas-scan (where the installer puts it; aionas-scan.exe
+# on Windows), then ~/.aionas/agent/bin/aionas-scan, then PATH.
 # Prints nothing, exits 0.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
@@ -18,7 +19,8 @@ find_scanner() {
     [ -x "$AIONAS_SCAN_BIN" ] && { echo "$AIONAS_SCAN_BIN"; return 0; }
     return 1
   fi
-  for _b in "$(aionas_agent_dir)/bin/aionas-scan" "$(aionas_agent_dir)/bin/aionas-scan.exe"; do
+  for _b in "$(aionas_agent_dir)/tools/aionas-scan" "$(aionas_agent_dir)/tools/aionas-scan.exe" \
+    "$(aionas_agent_dir)/bin/aionas-scan" "$(aionas_agent_dir)/bin/aionas-scan.exe"; do
     [ -f "$_b" ] && [ -x "$_b" ] && { echo "$_b"; return 0; }
   done
   command -v aionas-scan 2>/dev/null

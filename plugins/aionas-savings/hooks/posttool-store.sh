@@ -11,7 +11,7 @@
 #   - any other output over store_tokens (about 4 bytes a token) is kept in
 #     full in ~/.aionas/agent/savings/store/ and the model sees its first 40
 #     lines, the FAILED/Error lines between, its last 40 lines and one marker:
-#     [aionas-store: kept 40+40 of N lines, id=out_<12 hex>. More: aionas-recall out_<12 hex> [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]
+#     [aionas-store: kept 40+40 of N lines (about F tokens), id=out_<12 hex>. More: aionas-recall out_<12 hex> [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]
 # The id is the SHA-256 of the output bytes and the view is a pure function
 # of them, so the same output always gives the same bytes (the prompt cache
 # holds). Stored outputs never leave this computer and are removed after
@@ -86,10 +86,10 @@ case "$id" in out_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-
 
 keep=$(aionas_gs_int "$(aionas_gs_setting keep_lines_max 40)" 40)
 if [ "$method" = noisy_guard ]; then
-  LC_ALL=C awk -v mode=cap -v id="$id" -v rule="$rule" -v budget="$limit" -v tokens="$tokens" -v keep="$keep" \
+  LC_ALL=C awk -v mode=cap -v full="$size" -v id="$id" -v rule="$rule" -v budget="$limit" -v tokens="$tokens" -v keep="$keep" \
     -f "$AIONAS_GS_HOOKS/posttool-store.awk" "$tmp/out" >"$tmp/view" || exit 0
 else
-  LC_ALL=C awk -v mode=store -v id="$id" -v keep="$keep" \
+  LC_ALL=C awk -v mode=store -v full="$size" -v id="$id" -v keep="$keep" \
     -v head="$(aionas_gs_int "$(aionas_gs_setting store_head 40)" 40)" \
     -v tail="$(aionas_gs_int "$(aionas_gs_setting store_tail 40)" 40)" \
     -f "$AIONAS_GS_HOOKS/posttool-store.awk" "$tmp/out" >"$tmp/view" || exit 0

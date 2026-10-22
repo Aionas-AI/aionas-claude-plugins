@@ -720,6 +720,13 @@ describe('band: the handoff row (AIO-874)', () => {
     expect(await ui.find({ type: 'Text', text: '◷ Handoff doc in 50 min if this chat stays idle.' })).toBeDefined()
   })
 
+  test('a reloaded module whose session.start has not run still reads with this session id', async ($, on) => {
+    const w = world(on)
+    const r = await $.command.run({ command: 'aionas-done', args: '' } as never)
+    expect((r as any).text).toMatch(/^Done: no handoff doc/)
+    expect(scriptRuns(w, 'hooks/handoff-wake.sh').at(-1)?.slice(-2)).toEqual(['end', 'sess-test-1'])
+  })
+
   test('/aionas-done does the same without a model turn', async ($, on) => {
     const w = world(on)
     await start($)

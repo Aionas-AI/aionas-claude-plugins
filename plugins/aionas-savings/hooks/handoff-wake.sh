@@ -223,7 +223,7 @@ aionas_handoff_instruction() {
 [aionas-handoff] $_in_lead Do this now, and nothing else:
 1. Write a handoff document for a fresh conversation to $_in_md . Start it with the line "Previous conversation: $1 (claude --resume $1 returns to it)". Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
 2. Print a short starting prompt for the new conversation (two or three sentences that point at that file).
-A launcher that opens a new Claude Code session with that prompt is already saved at $_in_op .
+Do not give the developer a command or a launcher to run: once this chat is cold, the aionas band above the prompt shows "Continue in a new conversation", which opens one with that prompt.
 Do not run /compact and do not change any setting. When both are done, say the handoff is ready and stop.
 MSG
 }

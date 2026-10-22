@@ -113,7 +113,15 @@ function script(root: string, path: string): string {
   return `${root.replace(/\\/g, '/')}/${path}`
 }
 
+// This session's id. A reload starts the module's state over, and its
+// session.start may come late or not at all: read the id where it is missing.
+async function sessionId($: EngineInterface): Promise<string> {
+  if (st.sid === '') st.sid = await $.session.id().catch(() => '')
+  return st.sid
+}
+
 async function run($: EngineInterface, argv: string[]): Promise<Ran> {
+  await sessionId($)
   try {
     const r = await $.process.run([st.bash, ...argv], { timeoutMs: 15000, env: { AIONAS_SESSION_ID: st.sid } })
     return { code: r.exitCode, out: r.stdout.trim() }
@@ -229,7 +237,7 @@ function handoff($: EngineInterface, args: string[]): Promise<Ran> {
 
 // "Done with this chat": no handoff doc for this session.
 async function done($: EngineInterface): Promise<Ran> {
-  const r = await handoff($, ['end', st.sid])
+  const r = await handoff($, ['end', await sessionId($)])
   await refresh($)
   return r
 }
@@ -237,7 +245,7 @@ async function done($: EngineInterface): Promise<Ran> {
 // "Continue in a new conversation". Where neither way works, the starting
 // prompt is copied for the person to paste.
 async function newChat($: EngineInterface, surface: string | undefined): Promise<void> {
-  const old = st.sid
+  const old = await sessionId($)
   const r = await handoff($, ['prompt', old])
   if (r.code !== 0 || r.out === '') {
     $.ui.toast('The handoff doc of this chat was not found.')

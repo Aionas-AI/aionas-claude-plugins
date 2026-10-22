@@ -301,8 +301,8 @@ export const register: Register = on => {
     st.tick?.cancel()
     st.tick = undefined
     // The 30 s refresh only where a band is drawn: an interactive session, or
-    // the first band drawn (the desktop app's sessions are not interactive).
-    if (e.isInteractive) st.tick = $.clock.every(30_000, () => void refresh($))
+    // one a surface draws (the desktop app's sessions are not interactive).
+    if (e.isInteractive || e.surface !== null) st.tick = $.clock.every(30_000, () => void refresh($))
     return next(e)
   })
 
@@ -372,6 +372,12 @@ export const register: Register = on => {
     return { text: r.out || 'aionas-done could not run (bash was not found).', exitCode: r.code === 0 ? 0 : 1 }
   })
 
+  // A surface that joins later (the desktop app attaching) starts the refresh.
+  on('session.attach', async ($, e, next) => {
+    if (st.tick === undefined) st.tick = $.clock.every(30_000, () => void refresh($))
+    return next(e)
+  })
+
   // A /clear goes on under a new session id with no session.start: the band
   // reads the new session's facts.
   on('session.end', async ($, e, next) => {
@@ -425,7 +431,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    if (st.tick === undefined) st.tick = $.clock.every(30_000, () => void refresh($))
     if (st.facts === undefined) await st.listed
     const facts = st.facts
     if (facts === undefined || facts.methods.length === 0) return next(e)

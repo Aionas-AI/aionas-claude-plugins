@@ -601,12 +601,22 @@ describe('band: chips and the one-click bypass (M3)', () => {
     expect(w.bandReads()).toBe(n + 3)
   })
 
-  test('a session that is not interactive (the desktop app) still refreshes every 30 s once a band is drawn', async ($, on) => {
+  test('a session that is not interactive but drawn (the desktop app) still refreshes every 30 s', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: false })
-    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-    expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
     const n = w.bandReads()
+    await w.clock.advance(30_000)
+    expect(w.bandReads()).toBe(n + 1)
+  })
+
+  test('a headless session reads no band every 30 s until a surface attaches', async ($, on) => {
+    const w = world(on)
+    on('session.attach', () => ({ clientId: 'c1' }) as never)
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    const n = w.bandReads()
+    await w.clock.advance(30_000)
+    expect(w.bandReads()).toBe(n)
+    await $.session.attach({ surface: 'desktop', clientId: 'c1' } as never)
     await w.clock.advance(30_000)
     expect(w.bandReads()).toBe(n + 1)
   })

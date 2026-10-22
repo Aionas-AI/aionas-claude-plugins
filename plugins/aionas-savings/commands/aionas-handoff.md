@@ -1,5 +1,5 @@
 ---
-description: Write a handoff document for a new conversation now, and a launcher that opens it
+description: Write a handoff document for a new conversation now
 allowed-tools: Bash(bash *handoff-wake.sh" prepare *)
 ---
 !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/handoff-wake.sh" prepare "${CLAUDE_SESSION_ID}"`

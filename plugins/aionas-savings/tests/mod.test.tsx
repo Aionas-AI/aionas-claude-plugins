@@ -596,6 +596,19 @@ describe('band: chips and the one-click bypass (M3)', () => {
     await $.turn.complete({ turnId: 't1', reason: 'answer', answer: '', durationMs: 1, isAborted: false })
     await clock.settle()
     expect(w.bandReads()).toBe(n + 2)
+    // ...and again 20 s later, once the handoff timer had time to arm.
+    await clock.advance(20_000)
+    expect(w.bandReads()).toBe(n + 3)
+  })
+
+  test('a session that is not interactive (the desktop app) still refreshes every 30 s once a band is drawn', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: false })
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
+    const n = w.bandReads()
+    await w.clock.advance(30_000)
+    expect(w.bandReads()).toBe(n + 1)
   })
 })
 

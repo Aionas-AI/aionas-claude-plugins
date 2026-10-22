@@ -300,7 +300,8 @@ export const register: Register = on => {
     st.listed = refresh($)
     st.tick?.cancel()
     st.tick = undefined
-    // The 30 s refresh only where a band is drawn (an interactive session).
+    // The 30 s refresh only where a band is drawn: an interactive session, or
+    // the first band drawn (the desktop app's sessions are not interactive).
     if (e.isInteractive) st.tick = $.clock.every(30_000, () => void refresh($))
     return next(e)
   })
@@ -395,9 +396,15 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // After a main-loop turn, and again once the handoff timer has had time to
+  // arm (its Stop hook waits up to 15 s for the turn's answer): the countdown
+  // shows within seconds, not at the next 30 s read.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined) void refresh($)
+    if (e.agentId === undefined) {
+      void refresh($)
+      $.clock.after(20_000, () => void refresh($))
+    }
     return done
   })
 
@@ -418,6 +425,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    if (st.tick === undefined) st.tick = $.clock.every(30_000, () => void refresh($))
     if (st.facts === undefined) await st.listed
     const facts = st.facts
     if (facts === undefined || facts.methods.length === 0) return next(e)

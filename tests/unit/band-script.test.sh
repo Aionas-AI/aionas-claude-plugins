@@ -109,6 +109,22 @@ test_band_window_and_session_grant() {
   t_eq "$(printf 'window\t-\t0\txhigh')" "$(line "$(band)" window)" "an ended window is closed"
 }
 
+test_band_handoff_line_from_the_session_state() { # AIO-874
+  t_eq "$(printf 'handoff\t-\t0\t0\t0')" "$(line "$(band)" handoff)" "no state"
+  local d; d="$(aionas_savings_dir)/handoff"; aionas_mkdir "$d"
+  printf 'armed\t100\t30000\t1792000000\n' >"$d/s1.state"
+  t_eq "$(printf 'handoff\tarmed\t1792000000\t0\t0')" "$(line "$(band)" handoff)"
+  printf 'delivered\t100\t30000\t1792003600\n' >"$d/s1.state"
+  t_eq "$(printf 'handoff\tdelivered\t0\t1792003600\t0')" "$(line "$(band)" handoff)" "no doc yet"
+  printf '# doc\n' >"$d/handoff-s1.md"
+  t_eq "$(printf 'handoff\tdelivered\t0\t1792003600\t1')" "$(line "$(band)" handoff)"
+  printf 'delivered\t100\t30000\n' >"$d/s1.state"
+  t_eq "$(printf 'handoff\tdelivered\t0\t0\t1')" "$(line "$(band)" handoff)" "an older state line"
+  printf 'weird\t100\t1\t999\n' >"$d/s1.state"
+  t_eq "$(printf 'handoff\t-\t0\t0\t1')" "$(line "$(band)" handoff)"
+  t_eq "$(printf 'handoff\t-\t0\t0\t0')" "$(SID=s2 band | grep "^handoff$TAB")" "another session's state is not read"
+}
+
 test_band_gateway_host_and_local_offset() {
   t_enroll "https://GW.Example.test:8443/base/path"
   t_eq "$(printf 'gateway_host\tgw.example.test:8443')" "$(line "$(band)" gateway_host)"

@@ -38,6 +38,7 @@ type World = {
   flag: Record<string, unknown>
   parentArgs: string
   compactAt: string
+  handoff: string
   now: number
   bandReads: () => number
   clock: MockClock
@@ -58,7 +59,7 @@ function bandOut(w: World): string {
   }
   // A line the band must never turn into a chip (required, gateway-side).
   lines.push(['method', 'cache_guard', 'on', 1, 0, 0, 0, 0, 0].join('\t'))
-  lines.push(w.window, w.compactAt, 'gateway_host\tgw.example.test')
+  lines.push(w.window, w.compactAt, w.handoff, 'gateway_host\tgw.example.test')
   return lines.join('\n')
 }
 
@@ -81,6 +82,7 @@ function world(on: On, grant: string = 'high'): World {
     flag: {},
     parentArgs: '',
     compactAt: 'compact_at\t200000\t55',
+    handoff: 'handoff\t-\t0\t0\t0',
     now: T0,
     bandReads: () => reads,
     clock: mock.clock(on, { now: T0 * 1000 }),
@@ -123,6 +125,10 @@ function world(on: On, grant: string = 'high'): World {
         stdout = `${id}: sent for approval to your org admin or lead. It applies from your next session once approved.`
       }
     } else if (a.includes('aionas-bypass.sh')) stdout = 'noisy_guard is off for you for 1 hour, from now. Reason: debugging a flaky test.'
+    else if (a.includes('handoff-wake.sh end')) {
+      w.handoff = 'handoff\tended\t0\t0\t0'
+      stdout = 'Done: no handoff doc will be written for this chat. A new message here takes it back.'
+    } else if (a.includes('handoff-wake.sh prompt')) stdout = 'Continue the work described in the handoff document /h/handoff-sess-test-1.md. Read it fully first.'
     else if (a.includes('aionas-xhigh.sh')) {
       w.window = `window\txhigh\t${w.now + 600}\thigh`
       stdout = 'Higher effort is allowed for 10 minutes: sessions you open now start at their usual level, and you may raise them to xhigh (Extra) or max with /effort.'
@@ -138,6 +144,49 @@ function world(on: On, grant: string = 'high'): World {
 }
 
 const TIPS_WINDOW = 'Sessions you open before the timer ends may go up to xhigh or max.'
+
+const textOf = (n: any): string =>
+  typeof n === 'string'
+    ? n
+    : n === null || typeof n !== 'object'
+      ? ''
+      : n.type === 'Button' && (n.children ?? []).length === 0
+        ? `[ ${String(n.props?.label ?? '')} ]`
+        : (n.children ?? []).map(textOf).join('')
+
+// What a chip shows (its glyph and its Button or Text), without its tip.
+async function chipText(ui: any, id: string): Promise<string> {
+  const at = await ui.find({ key: `aionas-tipat-${id}` })
+  if (at === undefined) return ''
+  const shown = (at.children ?? []).filter((c: any) => c?.props?.position !== 'absolute')
+  const flat = (n: any): string => (n?.type === 'Box' ? (n.children ?? []).map(flat).join(' ') : textOf(n))
+  return shown.map(flat).join(' ').replace(/\[ (.*?) \]/g, '$1').replace(/\s+/g, ' ').trim()
+}
+
+const TIPS_SAVED =
+  'An estimate since the first full day after install, net of anything that got worse. On a subscription plan it is not money you were charged.'
+
+// The tip of element `id`: on the desktop the hidden absolute card inside its
+// keyed Box; on the terminal the hidden row under the band its scope reveals.
+async function cardOf(ui: any, id: string, surface = 'desktop'): Promise<any> {
+  if (surface === 'terminal') {
+    // The drawn tree carries hover on the element itself (find does not).
+    let row: any
+    const walk = (n: any): void => {
+      if (n === null || typeof n !== 'object' || row !== undefined) return
+      if (n.props?.key === `aionas-tip-${id}`) row = n
+      for (const c of n.children ?? []) walk(c)
+    }
+    walk(await ui.drawn())
+    expect(row).toBeDefined()
+    return row
+  }
+  const at = await ui.find({ key: `aionas-tipat-${id}` })
+  expect(at).toBeDefined()
+  const card = (at.children ?? []).find((c: any) => c?.props?.position === 'absolute')
+  expect(card).toBeDefined()
+  return card
+}
 
 const scriptRuns =(w: World, script: string): string[][] => w.argv.filter(a => a.some(x => x.endsWith(script)))
 
@@ -170,9 +219,9 @@ describe('band: one line and the full view (M1)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · Acme · mbp-noa · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
-      expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard')
-      expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● medium · allow more')
-      expect((await ui.find({ key: 'aionas-chip-subagent_sonnet' }))?.text).toContain('● sonnet subagents')
+      expect((await chipText(ui, 'noisy_guard'))).toContain('● guard')
+      expect((await chipText(ui, 'effort_default'))).toBe('● medium · allow more')
+      expect((await chipText(ui, 'subagent_sonnet'))).toContain('● sonnet subagents')
       expect(await ui.find({ type: 'Text', text: /^○ handoff$/ })).toBeDefined()
       expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
       expect(await ui.find({ key: 'aionas-hide' })).toBeUndefined()
@@ -184,7 +233,7 @@ describe('band: one line and the full view (M1)', () => {
       expect(
         await ui.find({ type: 'Text', text: 'saved since 8 Oct (13 days) ~$46.20 · today ~$3.80 · estimated · updated 13:05' }),
       ).toBeDefined()
-      expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard · 4 today')
+      expect((await chipText(ui, 'noisy_guard'))).toContain('● guard · 4 today')
       expect((await ui.find({ key: 'aionas-xhigh' }))?.props.label).toBe('allow higher effort for 10 min')
       expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
 
@@ -347,11 +396,11 @@ describe('band: chips and the one-click bypass (M3)', () => {
       const runs = scriptRuns(w, 'commands/aionas-bypass.sh').slice(before)
       expect(runs[0]?.slice(-2)).toEqual(['noisy_guard', '1h'])
       expect(runs.some(a => a.includes('--band'))).toBe(true)
-      expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('◌ guard · off until 14:00')
+      expect((await chipText(ui, 'noisy_guard'))).toContain('◌ guard · off until 14:00')
       await ui.press({ key: 'aionas-chip-noisy_guard' })
       const ended = scriptRuns(w, 'commands/aionas-bypass.sh').find(a => a.includes('--end'))
       expect(ended?.slice(-2)).toEqual(['--end', 'noisy_guard'])
-      expect((await ui.find({ key: 'aionas-chip-noisy_guard' }))?.text).toContain('● guard')
+      expect((await chipText(ui, 'noisy_guard'))).toContain('● guard')
       expect(w.toasts.some(t => t.includes('back on'))).toBe(true)
       expect(w.toasts.some(t => t.includes('off for you for 1 hour'))).toBe(true)
       await ui.unmount()
@@ -416,56 +465,89 @@ describe('band: chips and the one-click bypass (M3)', () => {
       w.window = 'window\t-\t0\thigh'
       w.now += 600
       await clock.advance(15_000)
-      expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● medium · allow more')
+      expect((await chipText(ui, 'effort_default'))).toBe('● medium · allow more')
       expect(await ui.find({ text: /sessions you open in the next/ })).toBeUndefined()
       await ui.unmount()
     }
   })
 
-  test('every chip and saved today has a hidden tip revealed on hover: what it is and what a click does', async ($, on) => {
+  test('every chip and saved today has a tip: a card above it on the desktop, the row under the band on the terminal', async ($, on) => {
     const w = world(on)
     w.methods.write_minimum = { ...(w.methods.write_minimum as M), state: 'off', active: 0 }
     await start($)
-    const tip = async (ui: any, id: string) => {
-      const box = await ui.find({ key: `aionas-tip-${id}` })
-      expect(box?.props.display).toBe('none')
-      // The drawn tree carries hover on the element itself: the tip reveals in
-      // the scope, and at least one visible element (the chip) joins it.
-      const hovers: { key: unknown; hover: unknown }[] = []
-      const walk = (n: any): void => {
-        if (n === null || typeof n !== 'object') return
-        if (n.hover !== undefined) hovers.push({ key: n.props?.key, hover: n.hover })
-        for (const c of n.children ?? []) walk(c)
+    // AIO-874: the desktop app reveals an absolute card in a keyed Box, not a
+    // scope row; the terminal keeps the row under the band (Tal, 2026-10-22).
+    const expectTip = async (ui: any, surface: string, id: string, full: string) => {
+      const card = await cardOf(ui, id, surface)
+      expect(card.props.display).toBe('none')
+      const text = textOf(card)
+      if (surface === 'desktop') {
+        expect(card.hover).toEqual({ display: 'flex' })
+        expect(card.props.top).toBeLessThan(0)
+        expect(card.props.width).toBeLessThanOrEqual(56)
+        expect(card.props.left).toBeLessThanOrEqual(0)
+        expect(text).toBe(full)
+      } else {
+        expect(card.hover).toEqual({ scope: `aionas-tip-${id}`, display: 'flex' })
+        expect(card.props.position).toBeUndefined()
+        expect(text).toBe(full)
+        // The element itself joins the scope.
+        let at: any
+        const walk = (n: any): void => {
+          if (n === null || typeof n !== 'object' || at !== undefined) return
+          if (n.props?.key === `aionas-tipat-${id}`) at = n
+          for (const c of n.children ?? []) walk(c)
+        }
+        walk(await ui.drawn())
+        expect(at?.hover).toEqual({ scope: `aionas-tip-${id}` })
       }
-      walk(await ui.drawn())
-      const scope = `aionas-tip-${id}`
-      expect(hovers.find(h => h.key === scope)?.hover).toEqual({ scope, display: 'flex' })
-      expect(hovers.some(h => h.key !== scope && (h.hover as any).scope === scope && (h.hover as any).display === undefined)).toBe(true)
-      return box?.text as string
     }
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
-      expect(await tip(ui, 'saved')).toContain('not money you were charged')
-      expect(await tip(ui, 'noisy_guard')).toBe(
-        'Noisy commands are shortened. Click: off for you for 1 hour.',
-      )
-      expect(await tip(ui, 'effort_default')).toBe(
-        'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max.',
-      )
-      expect(await tip(ui, 'handoff')).toMatch(/^Off now\. A long chat left idle/)
+      await expectTip(ui, surface, 'saved', TIPS_SAVED)
+      await expectTip(ui, surface, 'noisy_guard', 'Noisy commands are shortened. Click: off for you for 1 hour.')
+      await expectTip(ui, surface, 'effort_default', 'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max.')
+      await expectTip(ui, surface, 'handoff', 'Off now. A long chat left idle gets a note to go on in a new session.')
       await ui.press({ key: 'aionas-chip-noisy_guard' })
-      expect(await tip(ui, 'noisy_guard')).toMatch(/Click: back on\.$/)
+      await expectTip(ui, surface, 'noisy_guard', 'Noisy commands are shortened. Click: back on.')
       await ui.press({ key: 'aionas-chip-noisy_guard' })
       await ui.press({ key: 'aionas-chip-effort_default' })
-      expect(await tip(ui, 'effort_default')).toBe(TIPS_WINDOW)
+      await expectTip(ui, surface, 'effort_default', TIPS_WINDOW)
       w.window = 'window\t-\t0\thigh'
       w.now += 600
       await w.clock.advance(15_000)
       await ui.press({ key: 'aionas-more' })
-      expect(await tip(ui, 'write_minimum')).toMatch(/^Off now\. Claude writes only what the task needs\./)
+      await expectTip(ui, surface, 'write_minimum', 'Off now. Claude writes only what the task needs.')
       await ui.press({ key: 'aionas-less' })
       await ui.unmount()
     }
+  })
+
+  test('on the desktop a card near the right edge moves left to stay inside the band', async ($, on) => {
+    world(on)
+    await start($)
+    const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect((await cardOf(desk, 'write_minimum', 'desktop')).props.left).toBeLessThan(0)
+    expect((await cardOf(desk, 'saved', 'desktop')).props.left).toBe(0)
+  })
+
+  test('a chip shows its state in color beside its Button: on green, off grey (a desktop drops a Button\'s child colors)', async ($, on) => {
+    const w = world(on)
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      const glyph = async (id: string) => (await ui.find({ key: `aionas-tipat-${id}` })).children[0].children[0]
+      expect((await glyph('noisy_guard')).props.color).toBe('success')
+      expect((await ui.find({ key: 'aionas-chip-noisy_guard' })).props.dimColor).toBe(false)
+      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      expect((await glyph('noisy_guard')).props.dimColor).toBe(true)
+      expect((await ui.find({ key: 'aionas-chip-noisy_guard' })).props.dimColor).toBe(true)
+      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      const off = await ui.find({ key: 'aionas-tipat-handoff' })
+      expect(off.children[0].props.dimColor).toBe(true)
+      await ui.unmount()
+    }
+    expect(w.toasts.length).toBeGreaterThan(0)
   })
 
   test('a session opened in a window says it may go higher, then the level it was raised to', async ($, on) => {
@@ -490,13 +572,13 @@ describe('band: chips and the one-click bypass (M3)', () => {
     w.settings = { effortLevel: 'low' }
     await start($)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● low · allow more')
+    expect((await chipText(ui, 'effort_default'))).toBe('● low · allow more')
     await step($, 'high')
-    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● high · allow more')
+    expect((await chipText(ui, 'effort_default'))).toBe('● high · allow more')
     await step($, 'low', 'agent-1')
-    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● high · allow more')
+    expect((await chipText(ui, 'effort_default'))).toBe('● high · allow more')
     await $.command.run({ command: 'effort', args: 'max' } as never)
-    expect((await ui.find({ key: 'aionas-chip-effort_default' }))?.text).toBe('● max · allow more')
+    expect((await chipText(ui, 'effort_default'))).toBe('● max · allow more')
   })
 
   test('the band refreshes every 30 s and after a main-loop turn', async ($, on) => {
@@ -541,7 +623,7 @@ describe('band: the warning row (§3.4)', () => {
       expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
       expect(compacts).toBe(0)
       await ui.press({ key: 'aionas-more' })
-      expect((await ui.find({ key: 'aionas-chip-handoff' }))?.text).toContain('● handoff · 214K')
+      expect((await chipText(ui, 'handoff'))).toContain('● handoff · 214K')
       expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
       await ui.press({ key: 'aionas-less' })
       await ui.unmount()
@@ -569,6 +651,86 @@ describe('band: the warning row (§3.4)', () => {
     await measure($, 120000)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: '▲ Context 120K of 1M. Compact recommended.' })).toBeDefined()
+  })
+})
+
+describe('band: the handoff row (AIO-874)', () => {
+  const handoffOn = (w: World) => (w.methods.handoff = { ...(w.methods.handoff as M), state: 'on', active: 1 })
+
+  test('idle above the threshold: minutes left until the doc, and Done stops it', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    w.handoff = `handoff\tarmed\t${T0 + 42 * 60 + 10}\t0\t0`
+    await start($)
+    await measure($, 214000)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ type: 'Text', text: '◷ Handoff doc in 43 min if this chat stays idle.' })).toBeDefined()
+      // The warning row no longer says a fixed idle time while the row counts.
+      expect(await ui.find({ type: 'Text', text: '▲ Context 214K of 1M. Compact recommended.' })).toBeDefined()
+      expect(textOf(await cardOf(ui, 'handoff_done', surface))).toContain(surface === 'desktop' ? 'A new message here takes it back' : 'Writes no handoff doc')
+      await ui.unmount()
+    }
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    w.now += 15 * 60
+    await w.clock.advance(15_000)
+    expect(await ui.find({ type: 'Text', text: '◷ Handoff doc in 28 min if this chat stays idle.' })).toBeDefined()
+    await ui.press({ key: 'aionas-handoff-done' })
+    await w.clock.settle()
+    expect(scriptRuns(w, 'hooks/handoff-wake.sh').at(-1)?.slice(-2)).toEqual(['end', 'sess-test-1'])
+    expect(w.toasts.at(-1)).toMatch(/^Done: no handoff doc/)
+    expect(await ui.find({ key: 'aionas-handoff' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '▲ Context 214K of 1M. Compact recommended.' })).toBeDefined()
+  })
+
+  test('/aionas-done does the same without a model turn', async ($, on) => {
+    const w = world(on)
+    await start($)
+    const r = await $.command.run({ command: 'aionas-done', args: '' } as never)
+    expect((r as any).text).toMatch(/^Done: no handoff doc/)
+    expect(scriptRuns(w, 'hooks/handoff-wake.sh').at(-1)?.slice(-2)).toEqual(['end', 'sess-test-1'])
+  })
+
+  test('after the doc: minutes left until cold; once cold, continue in a new conversation', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    const commands: string[] = []
+    const fills: string[] = []
+    on('command.run', { command: 'clear' }, () => {
+      commands.push('clear')
+      return { text: '' }
+    })
+    on('prompt.fill', ($, e) => {
+      fills.push(e.text)
+      return { isFilled: true, text: e.text, cursor: e.text.length } as never
+    })
+    w.handoff = `handoff\tdelivered\t0\t${T0 + 30 * 60}\t1`
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ type: 'Text', text: '◷ Handoff doc written. This chat goes cold in 30 min.' })).toBeDefined()
+    expect(await ui.find({ key: 'aionas-handoff-new' })).toBeUndefined()
+    w.now += 30 * 60
+    await w.clock.advance(15_000)
+    expect(await ui.find({ type: 'Text', text: '◷ This chat is cold: going on here reads all of it again.' })).toBeDefined()
+    expect(textOf(await cardOf(ui, 'handoff_new'))).toContain('/resume goes back to it')
+    await ui.press({ key: 'aionas-handoff-new' })
+    await w.clock.settle()
+    expect(commands).toEqual(['clear'])
+    expect(fills).toEqual(['Continue the work described in the handoff document /h/handoff-sess-test-1.md. Read it fully first.'])
+    expect(w.toasts.at(-1)).toBe('New conversation: press Enter to start it. The old one is kept: /resume sess-test-1 goes back to it.')
+  })
+
+  test('no doc yet, handoff off, or done: no row', async ($, on) => {
+    const w = world(on)
+    w.handoff = `handoff\tdelivered\t0\t${T0 + 600}\t0`
+    handoffOn(w)
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await ui.find({ key: 'aionas-handoff' })).toBeUndefined()
+    w.handoff = `handoff\tarmed\t${T0 + 600}\t0\t0`
+    w.methods.handoff = { ...(w.methods.handoff as M), active: 0 }
+    await w.clock.advance(30_000)
+    expect(await ui.find({ key: 'aionas-handoff' })).toBeUndefined()
   })
 })
 

@@ -21,6 +21,12 @@
 //   install's pin (CLAUDE_CODE_EFFORT_LEVEL) is moved by /effort for the
 //   session it is typed in.
 // - The "write the minimum" skill expands to a no-op when the method is off.
+// - The handoff row (AIO-874): the minutes left until the handoff doc, with
+//   "Done with this chat" (also /aionas-done: no doc for this session); after
+//   the doc, the minutes left until the session's prompt cache runs out; once
+//   cold, "Continue in a new conversation": /clear (a new session id; the old
+//   session stays, /resume returns to it) and the starting prompt that names
+//   the doc put in the prompt box for the person to send.
 //
 // Privacy (W24-4): nothing here sends anything; the scripts send only method
 // ids, durations, closed-set params and a reason the person typed. The band
@@ -28,7 +34,7 @@
 // the context size from session.measure; it never calls $.http.fetch or
 // $.session.messages, nor reads ~/.claude/projects or the alias credential.
 import type { EngineInterface, Register } from 'claude-code'
-import { drawBand, isWindowOpen, parseBand, routeOf } from './band.tsx'
+import { drawBand, isCounting, parseBand, routeOf } from './band.tsx'
 import type { Action, Facts } from './band.tsx'
 
 type Grant = 'high' | 'xhigh' | 'max' | 'free'
@@ -118,15 +124,16 @@ async function bypass($: EngineInterface, args: string[]): Promise<Ran> {
 }
 
 // The band's facts, read again (§6): at session start, every 30 s, after a
-// press and after each main-loop turn. One read at a time. While an xhigh
-// window is open a 15 s timer keeps its countdown moving; it stops with it.
+// press and after each main-loop turn. One read at a time. While a countdown
+// runs (the xhigh window, the handoff doc, the cold time) a 15 s timer keeps
+// it moving; it stops with it.
 function refresh($: EngineInterface): Promise<void> {
   if (st.refreshing !== undefined) return st.refreshing
   const p = (async () => {
     const r = await bypass($, ['--band'])
     if (r.code !== 0 || r.out === '') return
     st.facts = parseBand(r.out)
-    const isOpen = isWindowOpen(st.facts)
+    const isOpen = isCounting(st.facts)
     if (isOpen && st.countdown === undefined) st.countdown = $.clock.every(15_000, () => void refresh($))
     if (!isOpen && st.countdown !== undefined) {
       st.countdown.cancel()
@@ -188,6 +195,61 @@ async function press($: EngineInterface, a: Action): Promise<void> {
   await refresh($)
 }
 
+// After a /clear the process goes on under a new session id, a moment later:
+// take it up (and forget the old session's context size) once it shows.
+async function adoptNewSession($: EngineInterface, old: string): Promise<void> {
+  for (let i = 0; i < 30; i++) {
+    const id = await $.session.id()
+    if (id !== old) {
+      st.sid = id
+      st.contextTokens = 0
+      st.laterAt = 0
+      await refresh($)
+      return
+    }
+    await $.clock.sleep(100)
+  }
+}
+
+function handoff($: EngineInterface, args: string[]): Promise<Ran> {
+  return run($, [script($.plugin.root, 'hooks/handoff-wake.sh'), ...args])
+}
+
+// "Done with this chat": no handoff doc for this session.
+async function done($: EngineInterface): Promise<Ran> {
+  const r = await handoff($, ['end', st.sid])
+  await refresh($)
+  return r
+}
+
+// "Continue in a new conversation": /clear starts one under a new session id
+// (the old one is kept, /resume returns to it) and the starting prompt that
+// names the handoff doc goes in the prompt box. Where /clear or the box
+// cannot be used, the prompt is copied instead.
+async function newChat($: EngineInterface, surface: string | undefined): Promise<void> {
+  const old = st.sid
+  const r = await handoff($, ['prompt', old])
+  if (r.code !== 0 || r.out === '') {
+    $.ui.toast('The handoff doc of this chat was not found.')
+    return
+  }
+  let isCleared = true
+  try {
+    await $.command.run({ command: 'clear' })
+  } catch {
+    isCleared = false
+  }
+  // The new conversation's own facts (no handoff row).
+  if (isCleared) void adoptNewSession($, old).catch(() => undefined)
+  const filled = isCleared ? await $.prompt.fill({ text: r.out }).catch(() => undefined) : undefined
+  if (filled?.isFilled === true) {
+    $.ui.toast(`New conversation: press Enter to start it. The old one is kept: /resume ${old} goes back to it.`)
+    return
+  }
+  await $.ui.copy({ text: r.out, ...(surface === undefined ? {} : { surface: surface as never }) }).catch(() => undefined)
+  $.ui.toast('The starting prompt is copied: paste it into a new conversation.')
+}
+
 async function compactNow($: EngineInterface): Promise<void> {
   await $.command.run({ command: 'compact' })
 }
@@ -203,6 +265,10 @@ export const register: Register = on => {
       name: 'aionas-bypass',
       description: 'Aionas: turn a savings method off for yourself for a while (sent for approval when your org blocks it)',
       argumentHint: '<method> [duration] [reason]',
+    })
+    await $.command.register({
+      name: 'aionas-done',
+      description: 'Aionas: done with this chat, so no handoff doc is written for it',
     })
     await $.command.register({
       name: 'aionas-xhigh',
@@ -288,6 +354,19 @@ export const register: Register = on => {
     return { text: r.out || 'aionas-bypass could not run (bash was not found).', exitCode: r.code === 0 ? 0 : 1 }
   })
 
+  on('command.run', { command: 'aionas-done' }, async $ => {
+    const r = await done($)
+    return { text: r.out || 'aionas-done could not run (bash was not found).', exitCode: r.code === 0 ? 0 : 1 }
+  })
+
+  // A /clear goes on under a new session id with no session.start: the band
+  // reads the new session's facts.
+  on('session.end', async ($, e, next) => {
+    const r = await next(e)
+    if (e.reason === 'clear') void adoptNewSession($, e.sessionId).catch(() => undefined)
+    return r
+  })
+
   on('command.run', { command: 'aionas-xhigh' }, async ($, e) => {
     const r = await run($, [script($.plugin.root, 'commands/aionas-xhigh.sh'), ...splitArgs(e.args)])
     return { text: r.out || 'aionas-xhigh could not run (bash was not found).', exitCode: r.code === 0 ? 0 : 1 }
@@ -352,6 +431,8 @@ export const register: Register = on => {
         xhigh: () => void press($, { kind: 'xhigh', method: 'effort_default' }),
         compact: () => void compactNow($),
         later: () => redraw($, () => (st.laterAt = st.contextTokens + 50_000)),
+        done: () => void done($).then(r => $.ui.toast(r.out || 'aionas could not run (bash was not found).')),
+        newChat: () => void newChat($, e.surface),
       },
     )
   })

@@ -35,6 +35,15 @@ export type MethodFact = {
   isRequestPending: boolean
   firedToday: number
 }
+// The session's handoff (hooks/stop-handoff.sh writes it, --band reads it):
+// armed counts down to `due`; delivered counts down to `coldAt`, when the
+// prompt cache this session paid for runs out; ended = the person said done.
+export type HandoffFact = {
+  status: 'armed' | 'delivered' | 'ended' | undefined
+  due: number
+  coldAt: number
+  hasDoc: boolean
+}
 export type Facts = {
   now: number
   tzOffset: number
@@ -45,6 +54,7 @@ export type Facts = {
   compactAt: number
   idleMinutes: number
   gatewayHost: string | undefined
+  handoff: HandoffFact
 }
 
 export type Action = { kind: 'bypass' | 'end' | 'xhigh'; method: string }
@@ -78,6 +88,8 @@ export const TIPS: Record<string, string> = {
   noisy_guard: 'Noisy commands are shortened.',
   output_store: 'Long output: Claude sees only its start, its end and the errors.',
   handoff: 'A long chat left idle gets a note to go on in a new session.',
+  handoff_done: 'Writes no handoff doc for this session. A new message here takes it back.',
+  handoff_new: 'Starts a new conversation with the doc. The old one is kept: /resume goes back to it.',
   unused_services: 'Tools unused for 30 days are turned off; /mcp turns one back on.',
   write_minimum: 'Claude writes only what the task needs.',
   saved:
@@ -114,6 +126,7 @@ export const parseBand = (out: string): Facts => {
     compactAt: 200000,
     idleMinutes: 55,
     gatewayHost: undefined,
+    handoff: { status: undefined, due: 0, coldAt: 0, hasDoc: false },
   }
   for (const line of out.split('\n')) {
     const p = line.split('\t')
@@ -165,6 +178,14 @@ export const parseBand = (out: string): Facts => {
         if (int(p[1]) > 0) f.compactAt = int(p[1])
         if (int(p[2]) > 0) f.idleMinutes = int(p[2])
         break
+      case 'handoff':
+        f.handoff = {
+          status: p[1] === 'armed' || p[1] === 'delivered' || p[1] === 'ended' ? p[1] : undefined,
+          due: int(p[2]),
+          coldAt: int(p[3]),
+          hasDoc: p[4] === '1',
+        }
+        break
       case 'gateway_host':
         f.gatewayHost = p[1] !== undefined && p[1] !== '-' && p[1] !== '' ? p[1].toLowerCase() : undefined
         break
@@ -196,6 +217,21 @@ export const mss = (seconds: number): string => {
 }
 
 export const isWindowOpen = (f: Facts): boolean => f.window.level !== undefined && f.window.until > f.now
+
+// Whole minutes left, at least 1 while any time is left.
+export const minutesLeft = (until: number, now: number): number => Math.max(1, Math.ceil((until - now) / 60))
+
+// What the handoff row shows (AIO-874): counting down to the doc, counting
+// down to cold, or cold with the doc ready; nothing otherwise.
+export type HandoffView = 'due' | 'warm' | 'cold' | undefined
+export const handoffView = (f: Facts): HandoffView => {
+  const h = f.handoff
+  if (h.status === 'armed' && h.due > f.now) return 'due'
+  if (h.status !== 'delivered' || !h.hasDoc) return undefined
+  return h.coldAt > f.now ? 'warm' : 'cold'
+}
+// The band reads its facts again every 15 s while a countdown runs.
+export const isCounting = (f: Facts): boolean => isWindowOpen(f) || handoffView(f) === 'due' || handoffView(f) === 'warm'
 
 // gateway when ANTHROPIC_BASE_URL's host is the enrolled gateway's (§4.3).
 export const routeOf = (baseUrl: string | undefined, gatewayHost: string | undefined): 'gateway' | 'subscription' => {
@@ -347,10 +383,39 @@ export type Handlers = {
   xhigh: () => void
   compact: () => void
   later: () => void
+  done: () => void
+  newChat: () => void
 }
 
 export const isWarning = (v: View): boolean =>
   v.contextTokens >= v.facts.compactAt && v.contextTokens >= v.laterAt
+
+// Tips (AIO-874, measured 2026-10-22). A graphical surface (the desktop app)
+// shows neither a row revealed by a hover scope nor a Button's label, but it
+// shows a card drawn absolute above the band, revealed by the hover of the
+// keyed Box it sits in (the card itself unkeyed: a keyed Box is a scope of its
+// own); showing it moves nothing. The terminal clips the band to its own rows,
+// so there the tip stays the row under the band that a hover scope reveals.
+export const CARD_MAX = 56
+export const cardSize = (text: string): { width: number; rows: number } => {
+  const width = Math.min(CARD_MAX, cells(text) + 4)
+  return { width, rows: Math.ceil(cells(text) / (width - 4)) + 2 }
+}
+// The column each element starts at in a row of `gap`-spaced elements that
+// wraps at `columns`, the first starting at `first`.
+export const startsOf = (widths: number[], first: number, columns: number, gap = 1): number[] => {
+  const out: number[] = []
+  let x = first
+  for (const w of widths) {
+    if (x > 0 && x + w > columns) x = 0
+    out.push(x)
+    x += w + gap
+  }
+  return out
+}
+// Moves a card left as far as it needs to stay inside the band's columns.
+export const cardLeft = (start: number, width: number, columns: number): number => Math.min(0, columns - start - width)
+const chipCells = (c: Chip): number => cells(c.text) + (c.action === undefined ? 0 : 4)
 
 // The band's tree for the terminal and the desktop (one tree; the desktop
 // draws it with its own buttons and type sizes).
@@ -360,57 +425,94 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
   const chips = chipsOf(f, { isFull: v.isFull, sessionLevel: v.sessionLevel, contextTokens: v.contextTokens })
   const handoff = f.methods.find(m => m.id === 'handoff')
 
-  const chipEl = (c: Chip) => {
+  const isTerminal = e.surface === 'terminal'
+  // The tip card of element `id` that starts at column `start` (a graphical
+  // surface; the terminal draws tipRow instead).
+  const card = (id: string, text: string, start: number) => {
+    if (isTerminal) return undefined
+    const size = cardSize(text)
+    return (
+      <Box
+        position="absolute"
+        top={-size.rows}
+        left={cardLeft(start, size.width, v.columns)}
+        width={size.width}
+        display="none"
+        hover={{ display: 'flex' }}
+        borderStyle="round"
+        borderDimColor
+        paddingX={1}
+      >
+        <Text key={tipScope(id)}>{text}</Text>
+      </Box>
+    )
+  }
+
+  // A chip: its glyph in the state's color beside the Button (a desktop draws
+  // a Button natively and drops its children's colors), on green, off and
+  // bypassed grey; a display-only chip is one Text in that color.
+  const chipEl = (c: Chip, start: number) => {
+    const glyph = c.text.slice(0, 1)
+    const rest = c.text.slice(2)
+    const action = c.action
     const body =
-      c.tone === 'on' ? (
+      action !== undefined ? (
+        <Box flexDirection="row" columnGap={1}>
+          <Text color={c.tone === 'on' ? 'success' : c.tone === 'pending' ? 'warning' : undefined} dimColor={c.tone === 'bypassed' || c.tone === 'dim'}>
+            {glyph}
+          </Text>
+          <Button key={c.key} label={rest} dimColor={c.tone !== 'on'} onPress={() => on.chip(action)} />
+        </Box>
+      ) : c.tone === 'on' ? (
         <Text>
-          <Text color="success">●</Text>
+          <Text color="success">{glyph}</Text>
           {c.text.slice(1)}
         </Text>
       ) : c.tone === 'window' ? (
         <Text color="merged" weight="semibold">
           {c.text}
         </Text>
-      ) : c.tone === 'dim' ? (
-        <Text dimColor>{c.text}</Text>
-      ) : (
+      ) : c.tone === 'pending' ? (
         <Text color="warning">{c.text}</Text>
+      ) : (
+        <Text dimColor>{c.text}</Text>
       )
-    const action = c.action
     return (
-      <Box hover={{ scope: tipScope(c.method) }}>
-        {action === undefined ? (
-          body
-        ) : (
-          <Button key={c.key} label={c.text} onPress={() => on.chip(action)}>
-            {body}
-          </Button>
-        )}
+      <Box key={`aionas-tipat-${c.method}`} hover={isTerminal ? { scope: tipScope(c.method) } : undefined}>
+        {body}
+        {card(c.method, tipOf(c), start)}
       </Box>
     )
   }
+  // The terminal's tips: a row under the band, every tip drawn hidden and the
+  // hovered element's revealed through its scope (as before AIO-874).
+  const tipRow = (key: string, tips: { id: string; text: string }[]) =>
+    isTerminal ? (
+      <Box key={key} flexDirection="column">
+        {tips.map(t => (
+          <Box key={tipScope(t.id)} display="none" hover={{ scope: tipScope(t.id), display: 'flex' }}>
+            <Text dimColor>{t.text}</Text>
+          </Box>
+        ))}
+      </Box>
+    ) : undefined
+  const chipTips = (shown: Chip[]) => [
+    ...(f.savings === undefined ? [] : [{ id: 'saved', text: TIPS.saved as string }]),
+    ...shown.map(c => ({ id: c.method, text: tipOf(c) })),
+  ]
 
-  // The hover row: every tip drawn hidden, the hovered chip's revealed.
-  const tipRow = (shown: Chip[]) => (
-    <Box key="aionas-tips" flexDirection="column">
-      {f.savings !== undefined && (
-        <Box key={tipScope('saved')} display="none" hover={{ scope: tipScope('saved'), display: 'flex' }}>
-          <Text dimColor>{TIPS.saved}</Text>
-        </Box>
-      )}
-      {shown.map(c => (
-        <Box key={tipScope(c.method)} display="none" hover={{ scope: tipScope(c.method), display: 'flex' }}>
-          <Text dimColor>{tipOf(c)}</Text>
-        </Box>
-      ))}
-    </Box>
-  )
+  const chipEls = (shown: Chip[], first: number) => {
+    const at = startsOf(shown.map(chipCells), first, v.columns)
+    return shown.map((c, i) => chipEl(c, at[i] ?? 0))
+  }
 
   const rows = []
   if (!v.isFull) {
     const line = fitOneLine(f, v.route, chips, v.columns)
+    const lead = `aionas │ ${line.who}${f.savings === undefined ? '' : ` │ ${savedLine(f.savings)}`} │`
     rows.push(
       <Box key="aionas-line" flexDirection="row" flexWrap="wrap" columnGap={1}>
+        <Box key="aionas-tipat-saved" hover={isTerminal ? { scope: tipScope('saved') } : undefined}>
         <Text>
           <Text color="claude" weight="bold">
             aionas
@@ -421,18 +523,20 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
           {f.savings !== undefined && <Text dimColor> │ </Text>}
           {f.savings !== undefined && <Text>{savedParts(f.savings).lead}</Text>}
           {f.savings !== undefined && (
-            <Text color="success" weight="bold" hover={{ scope: tipScope('saved') }}>
+            <Text color="success" weight="bold">
               {savedParts(f.savings).amount}
             </Text>
           )}
           {f.savings !== undefined && <Text dimColor>{savedParts(f.savings).tail}</Text>}
           <Text dimColor> │</Text>
         </Text>
-        {line.chips.map(chipEl)}
+        {f.savings !== undefined && card('saved', TIPS.saved as string, 0)}
+        </Box>
+        {chipEls(line.chips, cells(lead) + 1)}
         {line.more > 0 && <Text dimColor>+{line.more}</Text>}
         <Button key="aionas-more" label="More" dimColor onPress={on.more} />
       </Box>,
-      tipRow(line.chips),
+      tipRow('aionas-tips', chipTips(line.chips)),
     )
   } else {
     const me = f.me
@@ -457,15 +561,16 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
     )
     if (f.savings !== undefined)
       rows.push(
-        <Text key="aionas-saved" hover={{ scope: tipScope('saved') }}>
-          {savedFull(f.savings, f.tzOffset)}
-        </Text>,
+        <Box key="aionas-tipat-saved" hover={isTerminal ? { scope: tipScope('saved') } : undefined}>
+          <Text key="aionas-saved">{savedFull(f.savings, f.tzOffset)}</Text>
+          {card('saved', TIPS.saved as string, 0)}
+        </Box>,
       )
     rows.push(
       <Box key="aionas-chips" flexDirection="row" flexWrap="wrap" columnGap={1}>
-        {chips.map(chipEl)}
+        {chipEls(chips, 0)}
       </Box>,
-      tipRow(chips),
+      tipRow('aionas-tips', chipTips(chips)),
     )
     rows.push(
       <Box key="aionas-buttons" flexDirection="row" columnGap={1}>
@@ -489,8 +594,41 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
     )
   }
 
+  const hv = handoff?.isActive === true ? handoffView(f) : undefined
+  if (hv !== undefined) {
+    const text =
+      hv === 'due'
+        ? `◷ Handoff doc in ${minutesLeft(f.handoff.due, f.now)} min if this chat stays idle.`
+        : hv === 'warm'
+          ? `◷ Handoff doc written. This chat goes cold in ${minutesLeft(f.handoff.coldAt, f.now)} min.`
+          : '◷ This chat is cold: going on here reads all of it again.'
+    rows.push(
+      <Box key="aionas-handoff" flexDirection="row" flexWrap="wrap" columnGap={1}>
+        <Text color={hv === 'cold' ? 'warning' : undefined} dimColor={hv !== 'cold'}>
+          {text}
+        </Text>
+        {hv === 'due' && (
+          <Box key="aionas-tipat-handoff_done" hover={isTerminal ? { scope: tipScope('handoff_done') } : undefined}>
+            <Button key="aionas-handoff-done" label="Done with this chat" dimColor onPress={on.done} />
+            {card('handoff_done', TIPS.handoff_done as string, cells(text) + 1)}
+          </Box>
+        )}
+        {hv === 'cold' && (
+          <Box key="aionas-tipat-handoff_new" hover={isTerminal ? { scope: tipScope('handoff_new') } : undefined}>
+            <Button key="aionas-handoff-new" label="Continue in a new conversation" variant="primary" onPress={on.newChat} />
+            {card('handoff_new', TIPS.handoff_new as string, cells(text) + 1)}
+          </Box>
+        )}
+      </Box>,
+      tipRow('aionas-handoff-tips', [
+        ...(hv === 'due' ? [{ id: 'handoff_done', text: TIPS.handoff_done as string }] : []),
+        ...(hv === 'cold' ? [{ id: 'handoff_new', text: TIPS.handoff_new as string }] : []),
+      ]),
+    )
+  }
+
   if (isWarning(v)) {
-    const idle = handoff?.isActive === true ? ` Idle ${f.idleMinutes} min → a handoff doc is written.` : ''
+    const idle = handoff?.isActive === true && f.handoff.status === undefined ? ` Idle ${f.idleMinutes} min → a handoff doc is written.` : ''
     rows.push(
       <Box key="aionas-warning" flexDirection="row" flexWrap="wrap" columnGap={1}>
         <Text color="warning">

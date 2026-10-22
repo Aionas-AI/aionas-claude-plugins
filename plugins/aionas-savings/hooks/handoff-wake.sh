@@ -273,7 +273,11 @@ aionas_handoff_end() {
     echo "The handoff doc of this chat is already written; nothing to stop."
     return 0
   fi
-  ( set -C; : >"$_en_dir/$1.done" ) 2>/dev/null
+  # The marker taken by the delivery a moment ago wins: never overwrite it.
+  if ! ( set -C; : >"$_en_dir/$1.done" ) 2>/dev/null && [ "$(aionas_handoff_state_field "$1" 1)" != ended ]; then
+    echo "The handoff doc of this chat is already being written; nothing to stop."
+    return 0
+  fi
   aionas_handoff_disarm "$1"
   aionas_handoff_status "$1" ended 0
   echo "Done: no handoff doc will be written for this chat. A new message here takes it back."
@@ -291,7 +295,10 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     cancel)
       _in=$(cat 2>/dev/null)
-      _sid=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null | aionas_json_get session_id)
+      _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)
+      _sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
+      # /aionas-done itself is no new message: it must not take "done" back.
+      case "$(printf '%s\n' "$_flat" | aionas_json_get prompt)" in /aionas-done | "/aionas-done "*) exit 0 ;; esac
       _aionas_sid_ok "$_sid" && aionas_handoff_cancel "$_sid"
       exit 0
       ;;

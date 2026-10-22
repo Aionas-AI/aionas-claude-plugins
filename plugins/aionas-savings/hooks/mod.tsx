@@ -137,7 +137,7 @@ function refresh($: EngineInterface): Promise<void> {
     if (r.code !== 0 || r.out === '') return
     st.facts = parseBand(r.out)
     const isOpen = isCounting(st.facts)
-    if (isOpen && st.countdown === undefined) st.countdown = $.clock.every(15_000, () => void refresh($))
+    if (isOpen && st.countdown === undefined) st.countdown = $.clock.every(15_000, () => void drawnRefresh($))
     if (!isOpen && st.countdown !== undefined) {
       st.countdown.cancel()
       st.countdown = undefined
@@ -462,8 +462,11 @@ export const register: Register = on => {
         xhigh: () => void press($, { kind: 'xhigh', method: 'effort_default' }),
         compact: () => void compactNow($),
         later: () => redraw($, () => (st.laterAt = st.contextTokens + 50_000)),
-        done: () => void done($).then(r => $.ui.toast(r.out || 'aionas could not run (bash was not found).')),
-        newChat: () => void newChat($, e.surface),
+        done: () =>
+          void done($)
+            .then(r => $.ui.toast(r.out || 'aionas could not run (bash was not found).'))
+            .catch(() => undefined),
+        newChat: () => void newChat($, e.surface).catch(() => undefined),
       },
     )
   })

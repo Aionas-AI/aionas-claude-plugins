@@ -324,6 +324,26 @@ test_done_stops_the_timer_and_a_new_prompt_takes_it_back() { # AIO-874
   t_eq 2 "$(wait_rc "$RUN")" "armed and delivered again"
 }
 
+test_done_never_overwrites_a_delivery_in_progress() { # AIO-874
+  mkdir -p "$(hdir)"; : >"$(hdir)/$SID.done"
+  printf 'armed\t1\t30000\t2\n' >"$(hdir)/$SID.state"
+  t_contains "$(bash "$HOOKS/handoff-wake.sh" end "$SID")" "already being written"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq armed "$(aionas_handoff_state_field "$SID" 1)"
+  t_ok test -f "$(hdir)/$SID.done"
+}
+
+test_typed_aionas_done_is_not_a_new_message() { # AIO-874
+  policy_low
+  bash "$HOOKS/handoff-wake.sh" end "$SID" >/dev/null
+  printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"/aionas-done"}' "$SID" | bash "$HOOKS/handoff-cancel.sh"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq ended "$(aionas_handoff_state_field "$SID" 1)" "the command keeps done"
+  t_ok test -f "$(hdir)/$SID.done"
+  cancel_prompt
+  t_eq cancelled "$(aionas_handoff_state_field "$SID" 1)" "a real message takes it back"
+}
+
 test_done_after_the_doc_changes_nothing() { # AIO-874
   policy_low
   run_stop handoff-arm.sh "$(transcript 30000)"

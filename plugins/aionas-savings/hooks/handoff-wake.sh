@@ -4,12 +4,17 @@
 # Source it (stop-handoff.sh does), or run it:
 #   handoff-wake.sh cancel                 UserPromptSubmit: a prompt cancels the timer (reads the hook input)
 #   handoff-wake.sh prepare SESSION [CWD]  print the handoff instruction and write the launcher (/aionas-handoff)
+#   handoff-wake.sh end SESSION            "Done with this chat" (/aionas-done): no handoff doc for this session
+#   handoff-wake.sh prompt SESSION         print the starting prompt of the new conversation (exit 1: no doc yet)
+#   handoff-wake.sh open-app URL           open a new desktop-app session (claude://code/new?... only)
 #
 # State, under $(aionas_savings_dir)/handoff/ (numbers and names only, never content):
 #   <sid>.armed   the token of the one live timer; a timer whose token differs, or whose file is gone, quits
 #   <sid>.done    exists once the instruction was delivered: one handoff per session
-#   <sid>.state   "<status><TAB><epoch><TAB><context tokens>"; status armed | cancelled | delivered
-#                 (the plugin band reads it: delivered -> "Compact recommended")
+#   <sid>.state   "<status><TAB><epoch><TAB><context tokens><TAB><until>"; status armed | cancelled |
+#                 delivered | ended. until: armed, when the doc is asked for; delivered, when the
+#                 prompt cache goes cold (the last turn's end + its cache TTL); else 0. The band
+#                 counts down to it (AIO-874). ended: the person said done; a new prompt undoes it.
 #   <sid>.bypass  the bypass counter was taken for this session
 #   handoff-<sid>.md        the handoff document, written by the same session when asked
 #   opener-<sid>.sh / .cmd  one file that opens a new Claude Code session with the starting prompt
@@ -28,9 +33,30 @@ AIONAS_HANDOFF_MAX_IDLE_SECONDS=3480
 
 aionas_handoff_dir() { echo "$(aionas_savings_dir)/handoff"; }
 
-# aionas_handoff_status SID STATUS [TOKENS]: record the status for the band.
+# aionas_handoff_status SID STATUS [TOKENS] [UNTIL]: record the status for the band.
 aionas_handoff_status() {
-  printf '%s\t%s\t%s\n' "$2" "$(aionas_now)" "${3:-0}" | aionas_write_atomic "$(aionas_handoff_dir)/$1.state"
+  printf '%s\t%s\t%s\t%s\n' "$2" "$(aionas_now)" "${3:-0}" "${4:-0}" | aionas_write_atomic "$(aionas_handoff_dir)/$1.state"
+}
+
+# aionas_handoff_state_field SID N: field N of the session's state line.
+aionas_handoff_state_field() {
+  awk -F '\t' -v n="$2" 'NR == 1 { print $n; exit }' "$(aionas_handoff_dir)/$1.state" 2>/dev/null
+}
+
+# aionas_handoff_cache_ttl TRANSCRIPT: the prompt-cache lifetime this session
+# writes with, in seconds: 3600 when its recent answers wrote 1-hour cache
+# entries, 300 when they wrote only 5-minute ones; 3600 with no sign either
+# way (the idle timer assumes the hour too). Reads two numbers per answer.
+# Test seam: AIONAS_HANDOFF_TTL_SECONDS.
+aionas_handoff_cache_ttl() {
+  if [ -n "${AIONAS_HANDOFF_TTL_SECONDS:-}" ] && aionas_is_uint "$AIONAS_HANDOFF_TTL_SECONDS"; then
+    echo "$AIONAS_HANDOFF_TTL_SECONDS"; return 0
+  fi
+  [ -f "$1" ] || { echo 3600; return 0; }
+  tail -c 4000000 "$1" 2>/dev/null | grep -E '"(type|role)":"assistant"' | grep '"ephemeral_' | tail -n 50 | awk '
+    function num(k,   s) { if (!match($0, "\"" k "\":[0-9]+")) return 0; s = substr($0, RSTART, RLENGTH); sub(/.*:/, "", s); return s + 0 }
+    { if (num("ephemeral_1h_input_tokens") > 0) h = 1; else if (num("ephemeral_5m_input_tokens") > 0) h = 0; else next; seen = 1 }
+    END { print (seen && !h) ? 300 : 3600 }'
 }
 
 # aionas_handoff_context_tokens TRANSCRIPT: the context size of the last
@@ -195,14 +221,14 @@ aionas_handoff_instruction() {
   fi
   cat <<MSG
 [aionas-handoff] $_in_lead Do this now, and nothing else:
-1. Write a handoff document for a fresh conversation to $_in_md . Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
+1. Write a handoff document for a fresh conversation to $_in_md . Start it with the line "Previous conversation: $1 (claude --resume $1 returns to it)". Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
 2. Print a short starting prompt for the new conversation (two or three sentences that point at that file).
-A launcher that opens a new Claude Code session with that prompt is already saved at $_in_op .
+Do not give the developer a command or a launcher to run: once this chat is cold, the aionas band above the prompt shows "Continue in a new conversation", which opens one with that prompt.
 Do not run /compact and do not change any setting. When both are done, say the handoff is ready and stop.
 MSG
 }
 
-# aionas_handoff_deliver SID CWD TOKEN TOKENS MINUTES: the wake. Exit 2 with
+# aionas_handoff_deliver SID CWD TOKEN TOKENS MINUTES [TTL]: the wake. Exit 2 with
 # the instruction on stderr (Claude Code wakes the same session with it) when
 # this is the one live timer and nothing was delivered yet; exit 0 and no
 # output otherwise.
@@ -217,26 +243,62 @@ aionas_handoff_deliver() {
     return 0
   fi
   rm -f "$_dv_dir/$1.armed"
-  aionas_handoff_status "$1" delivered "$4"
+  # The wake is a turn: the cache stays warm for TTL after it (the Stop after
+  # the doc is written moves this on).
+  aionas_handoff_status "$1" delivered "$4" $(($(aionas_now) + ${6:-3600}))
   aionas_counter_inc handoff fired >/dev/null 2>&1
   printf '%s\n' "$_dv_msg" >&2
   return 2
 }
 
-# aionas_handoff_cancel SID: a prompt arrived.
+# aionas_handoff_cancel SID: a prompt arrived. It also takes back "done":
+# the person went on with the chat.
 aionas_handoff_cancel() {
   if aionas_handoff_disarm "$1"; then
     aionas_handoff_status "$1" cancelled 0
     aionas_counter_inc handoff skipped >/dev/null 2>&1
+  elif [ "$(aionas_handoff_state_field "$1" 1)" = ended ]; then
+    rm -f "$(aionas_handoff_dir)/$1.done"
+    aionas_handoff_status "$1" cancelled 0
   fi
   return 0
+}
+
+# aionas_handoff_end SID: "Done with this chat": stop the timer and write no
+# handoff doc for this session. A session already handed off is left as is.
+aionas_handoff_end() {
+  _en_dir=$(aionas_handoff_dir)
+  aionas_mkdir "$_en_dir" || return 1
+  if [ "$(aionas_handoff_state_field "$1" 1)" = delivered ]; then
+    echo "The handoff doc of this chat is already written; nothing to stop."
+    return 0
+  fi
+  # The marker taken by the delivery a moment ago wins: never overwrite it.
+  if ! ( set -C; : >"$_en_dir/$1.done" ) 2>/dev/null && [ "$(aionas_handoff_state_field "$1" 1)" != ended ]; then
+    echo "The handoff doc of this chat is already being written; nothing to stop."
+    return 0
+  fi
+  aionas_handoff_disarm "$1"
+  aionas_handoff_status "$1" ended 0
+  echo "Done: no handoff doc will be written for this chat. A new message here takes it back."
+}
+
+# aionas_handoff_start_prompt SID: the new conversation's starting prompt,
+# when the session's doc exists.
+aionas_handoff_start_prompt() {
+  _sp_md="$(aionas_handoff_dir)/handoff-$1.md"
+  [ -s "$_sp_md" ] || return 1
+  aionas_handoff_prompt "$_sp_md"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     cancel)
       _in=$(cat 2>/dev/null)
-      _sid=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null | aionas_json_get session_id)
+      _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)
+      _sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
+      # /aionas-done itself is no new message: it must not take "done" back.
+      case "$(printf '%s\n' "$_flat" | aionas_json_get prompt)" in /aionas-done | "/aionas-done "*) exit 0 ;; esac
       _aionas_sid_ok "$_sid" && aionas_handoff_cancel "$_sid"
       exit 0
       ;;
@@ -244,6 +306,27 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       _aionas_sid_ok "${2:-}" || { echo "[aionas-handoff] no session id; ask Claude to write a handoff document for a new conversation."; exit 0; }
       aionas_handoff_instruction "$2" "${3:-$PWD}" 0 0
       exit 0
+      ;;
+    end)
+      _aionas_sid_ok "${2:-}" || { echo "No session id: nothing to stop."; exit 1; }
+      aionas_handoff_end "$2"
+      exit $?
+      ;;
+    prompt)
+      _aionas_sid_ok "${2:-}" || exit 1
+      aionas_handoff_start_prompt "$2"
+      exit $?
+      ;;
+    open-app)
+      # The desktop app's own link for a new Code session, with its first
+      # message (q) and folder; nothing else is opened.
+      case "${2:-}" in "claude://code/new?"*) ;; *) exit 2 ;; esac
+      case "$(aionas_os)" in
+        darwin) open "$2" ;;
+        windows) AIONAS_URL="$2" powershell.exe -NoProfile -NonInteractive -Command 'Start-Process $env:AIONAS_URL' ;;
+        *) exit 1 ;;
+      esac
+      exit $?
       ;;
   esac
   exit 0

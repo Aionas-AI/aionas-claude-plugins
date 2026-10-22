@@ -37,8 +37,14 @@ if aionas_policy_bypassed handoff "$_sid"; then
   exit 0
 fi
 
-# One handoff per session.
-[ -f "$(aionas_handoff_dir)/$_sid.done" ] && exit 0
+# One handoff per session. After it, each turn's end moves the time the
+# session's prompt cache goes cold (the band counts down to it).
+if [ -f "$(aionas_handoff_dir)/$_sid.done" ]; then
+  if [ "$(aionas_handoff_state_field "$_sid" 1)" = delivered ]; then
+    aionas_handoff_status "$_sid" delivered "$(aionas_handoff_state_field "$_sid" 3)" $(($(aionas_now) + $(aionas_handoff_cache_ttl "$_tr")))
+  fi
+  exit 0
+fi
 
 _th=$(aionas_policy_param handoff threshold_tokens "$_sid" 2>/dev/null)
 aionas_is_uint "$_th" && [ "$_th" -ge 1 ] || _th=$AIONAS_HANDOFF_DEFAULT_TOKENS
@@ -72,10 +78,10 @@ if [ "$_running" -gt 0 ]; then
 fi
 
 _token=$(aionas_handoff_arm "$_sid") || exit 0
-aionas_handoff_status "$_sid" armed "$_tok"
 _ppid=$PPID
 _start=$(date +%s)
 _deadline=$((_start + _idle_s))
+aionas_handoff_status "$_sid" armed "$_tok" "$_deadline"
 
 while :; do
   aionas_handoff_still_armed "$_sid" "$_token" || exit 0
@@ -84,7 +90,7 @@ while :; do
   [ -z "$_tr" ] || [ -f "$_tr" ] || exit 0
   _now=$(date +%s)
   if [ "$_now" -ge "$_deadline" ] && ! aionas_handoff_subagents_busy "$_tr" "$_sid" "$_busy"; then
-    aionas_handoff_deliver "$_sid" "$_cwd" "$_token" "$_tok" $(((_idle_s + 59) / 60))
+    aionas_handoff_deliver "$_sid" "$_cwd" "$_token" "$_tok" $(((_idle_s + 59) / 60)) "$(aionas_handoff_cache_ttl "$_tr")"
     exit $?
   fi
   _s=$_poll

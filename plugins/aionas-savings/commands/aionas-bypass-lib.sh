@@ -373,6 +373,26 @@ aionas_band_gateway_host() {
   echo "${_gh%%/*}" | tr 'A-Z' 'a-z'
 }
 
+# aionas_band_handoff SESSION_ID: "handoff <status|-> <due|0> <cold_at|0>
+# <doc 0|1> <since|0>" from the session's handoff state (hooks/handoff-wake.sh);
+# since = when the status was written (the band dates an older timer's
+# deadline from it).
+aionas_band_handoff() {
+  _bh_dir="$(aionas_savings_dir)/handoff"
+  if ! _aionas_sid_ok "$1" || [ ! -f "$_bh_dir/$1.state" ]; then
+    printf 'handoff\t-\t0\t0\t0\t0\n'
+    return 0
+  fi
+  _bh_doc=0
+  [ -s "$_bh_dir/handoff-$1.md" ] && _bh_doc=1
+  awk -F '\t' -v doc="$_bh_doc" 'NR == 1 {
+      s = ($1 == "armed" || $1 == "delivered" || $1 == "ended") ? $1 : "-"
+      u = ($4 ~ /^[0-9]+$/) ? $4 : 0
+      printf "handoff\t%s\t%s\t%s\t%s\t%s\n", s, (s == "armed") ? u : 0, (s == "delivered") ? u : 0, doc, ($2 ~ /^[0-9]+$/) ? $2 : 0
+      exit
+    }' "$_bh_dir/$1.state"
+}
+
 # aionas_band SESSION_ID: everything the band draws (mod spec §5, --band),
 # tab separated, numbers and names only. Leads with "clock <now> <utc offset
 # seconds>" so the band shows local times the way this computer does.
@@ -381,6 +401,7 @@ aionas_band() {
   printf 'clock\t%s\t%s\n' "$(aionas_now)" "$(aionas_band_tz_offset)"
   aionas_band_policy "$(aionas_savings_dir)/policy.json"
   aionas_band_methods "$1"
+  aionas_band_handoff "$1"
   printf 'gateway_host\t%s\n' "$(aionas_band_gateway_host)"
 }
 

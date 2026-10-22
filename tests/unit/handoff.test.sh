@@ -199,7 +199,8 @@ test_idle_wakes_same_session_once_with_files() {
   t_contains "$msg" "[aionas-handoff]"
   t_contains "$msg" "about 30K tokens"
   t_contains "$msg" "$(hdir)/handoff-$SID.md"
-  t_contains "$msg" "$(hdir)/opener-$SID.sh"
+  t_lacks "$msg" "opener-$SID" "no launcher to run: the band's button opens the new conversation"
+  t_contains "$msg" "Continue in a new conversation"
   t_contains "$msg" "Do not run /compact"
   t_eq "" "$(cat "$RUN/out")" "stdout stays empty"
   t_ok test -f "$(hdir)/$SID.done"
@@ -246,6 +247,136 @@ test_prompt_before_deadline_cancels() {
   t_not test -e "$(hdir)/opener-$SID.sh"
   t_contains "$(queue)" "$(printf 'handoff\tskipped\t1')"
   t_lacks "$(queue)" fired
+}
+
+# assistant_cache_line TOKENS KIND: an answer that wrote KIND (1h | 5m) cache entries.
+assistant_cache_line() {
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%d,"cache_creation":{"ephemeral_5m_input_tokens":%d,"ephemeral_1h_input_tokens":%d},"output_tokens":10}}}\n' \
+    "$SECRET2" "$(($1 - 1005))" "$([ "$2" = 5m ] && echo 1000 || echo 0)" "$([ "$2" = 1h ] && echo 1000 || echo 0)"
+}
+
+test_armed_state_says_when_the_doc_is_asked_for() { # AIO-874
+  policy_low
+  local before; before=$(date +%s)
+  IDLE=6 run_stop handoff-arm.sh "$(transcript 30000)"
+  sleep 1
+  . "$HOOKS/handoff-wake.sh"
+  t_eq armed "$(aionas_handoff_state_field "$SID" 1)"
+  local due; due=$(aionas_handoff_state_field "$SID" 4)
+  [ "$due" -ge $((before + 6)) ] && [ "$due" -le $((before + 9)) ] || t_fail "due $due is not the idle deadline (start $before + 6 s)"
+  cancel_prompt
+  wait_rc "$RUN" 30 >/dev/null
+}
+
+test_cache_ttl_reads_the_answers_cache_kind() { # AIO-874
+  . "$HOOKS/handoff-wake.sh"
+  local f="$HOME/ttl.jsonl"
+  { user_line; assistant_cache_line 30000 5m; } >"$f"
+  t_eq 300 "$(aionas_handoff_cache_ttl "$f")" "5-minute entries"
+  { user_line; assistant_cache_line 30000 1h; } >"$f"
+  t_eq 3600 "$(aionas_handoff_cache_ttl "$f")" "1-hour entries"
+  { user_line; assistant_line 30000; } >"$f"
+  t_eq 3600 "$(aionas_handoff_cache_ttl "$f")" "no sign: the hour"
+  t_eq 3600 "$(aionas_handoff_cache_ttl "$HOME/none.jsonl")"
+}
+
+test_after_the_doc_each_turn_end_moves_the_cold_time() { # AIO-874
+  policy_low
+  local f="$HOME/proj/$SID.jsonl"; mkdir -p "$HOME/proj"
+  { user_line; assistant_cache_line 30000 5m; } >"$f"
+  run_stop handoff-arm.sh "$f"
+  t_eq 2 "$(wait_rc "$RUN")"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq delivered "$(aionas_handoff_state_field "$SID" 1)"
+  local now cold; now=$(date +%s); cold=$(aionas_handoff_state_field "$SID" 4)
+  [ "$cold" -ge $((now + 290)) ] && [ "$cold" -le $((now + 300)) ] || t_fail "cold $cold is not the wake + 5 min"
+  # the doc-writing turn ends later, on 1-hour entries: the cold time moves on
+  { user_line; assistant_cache_line 31000 1h; } >"$f"
+  run_stop stop-handoff.sh "$f"
+  t_eq 0 "$(wait_rc "$RUN")"
+  t_eq "" "$(cat "$RUN/err")" "no second instruction"
+  now=$(date +%s); cold=$(aionas_handoff_state_field "$SID" 4)
+  [ "$cold" -ge $((now + 3590)) ] && [ "$cold" -le $((now + 3600)) ] || t_fail "cold $cold is not the turn end + 1 h"
+  t_eq delivered "$(aionas_handoff_state_field "$SID" 1)"
+}
+
+test_done_stops_the_timer_and_a_new_prompt_takes_it_back() { # AIO-874
+  policy_low
+  IDLE=4 run_stop handoff-arm.sh "$(transcript 30000)"
+  sleep 1
+  local msg; msg=$(bash "$HOOKS/handoff-wake.sh" end "$SID")
+  t_contains "$msg" "no handoff doc will be written"
+  t_eq 0 "$(wait_rc "$RUN" 30)" "the timer quits silently"
+  t_eq "" "$(cat "$RUN/err")"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq ended "$(aionas_handoff_state_field "$SID" 1)"
+  t_not test -e "$(hdir)/handoff-$SID.md"
+  t_not test -e "$(hdir)/opener-$SID.sh"
+  # a later turn's end arms nothing while done
+  run_stop stop-handoff.sh "$(transcript 31000)"
+  t_eq 0 "$(wait_rc "$RUN")"
+  t_not test -e "$(hdir)/$SID.armed"
+  t_lacks "$(queue)" fired
+  # the person goes on with the chat: done is taken back, the timer may arm again
+  cancel_prompt
+  t_eq cancelled "$(aionas_handoff_state_field "$SID" 1)"
+  t_not test -e "$(hdir)/$SID.done"
+  IDLE=2 run_stop stop-handoff.sh "$(transcript 32000)"
+  t_eq 2 "$(wait_rc "$RUN")" "armed and delivered again"
+}
+
+test_done_never_overwrites_a_delivery_in_progress() { # AIO-874
+  mkdir -p "$(hdir)"; : >"$(hdir)/$SID.done"
+  printf 'armed\t1\t30000\t2\n' >"$(hdir)/$SID.state"
+  t_contains "$(bash "$HOOKS/handoff-wake.sh" end "$SID")" "already being written"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq armed "$(aionas_handoff_state_field "$SID" 1)"
+  t_ok test -f "$(hdir)/$SID.done"
+}
+
+test_typed_aionas_done_is_not_a_new_message() { # AIO-874
+  policy_low
+  bash "$HOOKS/handoff-wake.sh" end "$SID" >/dev/null
+  printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"/aionas-done"}' "$SID" | bash "$HOOKS/handoff-cancel.sh"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq ended "$(aionas_handoff_state_field "$SID" 1)" "the command keeps done"
+  t_ok test -f "$(hdir)/$SID.done"
+  cancel_prompt
+  t_eq cancelled "$(aionas_handoff_state_field "$SID" 1)" "a real message takes it back"
+}
+
+test_done_after_the_doc_changes_nothing() { # AIO-874
+  policy_low
+  run_stop handoff-arm.sh "$(transcript 30000)"
+  t_eq 2 "$(wait_rc "$RUN")"
+  t_contains "$(bash "$HOOKS/handoff-wake.sh" end "$SID")" "already written"
+  . "$HOOKS/handoff-wake.sh"
+  t_eq delivered "$(aionas_handoff_state_field "$SID" 1)"
+  t_rc 1 bash "$HOOKS/handoff-wake.sh" end "bad id;"
+}
+
+test_start_prompt_needs_the_doc() { # AIO-874
+  t_rc 1 bash "$HOOKS/handoff-wake.sh" prompt "$SID"
+  mkdir -p "$(hdir)"; printf '# doc\n' >"$(hdir)/handoff-$SID.md"
+  local p; p=$(bash "$HOOKS/handoff-wake.sh" prompt "$SID")
+  t_contains "$p" "$(hdir)/handoff-$SID.md"
+  t_contains "$p" "Read it fully first"
+  t_rc 1 bash "$HOOKS/handoff-wake.sh" prompt "../x"
+}
+
+test_open_app_opens_only_the_new_session_link() { # AIO-874
+  t_rc 2 bash "$HOOKS/handoff-wake.sh" open-app "https://example.com/x"
+  t_rc 2 bash "$HOOKS/handoff-wake.sh" open-app "claude://code/continue?session=last"
+  t_rc 2 bash "$HOOKS/handoff-wake.sh" open-app ""
+  mkdir -p "$HOME/bin"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"%s/opened"\n' "$HOME" >"$HOME/bin/open"; chmod +x "$HOME/bin/open"
+  AIONAS_UNAME="$HOME/bin/darwin" PATH="$HOME/bin:$PATH" bash -c 'printf "#!/usr/bin/env bash\necho Darwin\n" >"$HOME/bin/darwin"; chmod +x "$HOME/bin/darwin"'
+  AIONAS_UNAME="$HOME/bin/darwin" PATH="$HOME/bin:$PATH" bash "$HOOKS/handoff-wake.sh" open-app 'claude://code/new?q=a%20b&folder=%2Fx'
+  t_eq 'claude://code/new?q=a%20b&folder=%2Fx' "$(cat "$HOME/opened")" "the URL as one argument"
+}
+
+test_instruction_names_the_previous_conversation() { # AIO-874
+  t_contains "$(bash "$HOOKS/handoff-wake.sh" prepare "$SID" "$HOME")" "Previous conversation: $SID (claude --resume $SID returns to it)"
 }
 
 test_newer_stop_replaces_the_timer() {

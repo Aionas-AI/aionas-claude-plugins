@@ -33,9 +33,11 @@ AIONAS_HANDOFF_MAX_IDLE_SECONDS=3480
 
 aionas_handoff_dir() { echo "$(aionas_savings_dir)/handoff"; }
 
-# aionas_handoff_status SID STATUS [TOKENS] [UNTIL]: record the status for the band.
+# aionas_handoff_status SID STATUS [TOKENS] [UNTIL] [WRITTEN]: record the
+# status for the band. WRITTEN (delivered only): 1 once the turn that wrote the
+# doc has ended, so only a prompt after it passes the handoff over.
 aionas_handoff_status() {
-  printf '%s\t%s\t%s\t%s\n' "$2" "$(aionas_now)" "${3:-0}" "${4:-0}" | aionas_write_atomic "$(aionas_handoff_dir)/$1.state"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$2" "$(aionas_now)" "${3:-0}" "${4:-0}" "${5:-0}" | aionas_write_atomic "$(aionas_handoff_dir)/$1.state"
 }
 
 # aionas_handoff_state_field SID N: field N of the session's state line.
@@ -261,12 +263,14 @@ aionas_handoff_cancel() {
     aionas_handoff_status "$1" cancelled 0
     aionas_counter_inc handoff skipped >/dev/null 2>&1
   else
-    case "$(aionas_handoff_state_field "$1" 1)" in
-      ended | delivered)
-        rm -f "$(aionas_handoff_dir)/$1.done"
-        aionas_handoff_status "$1" cancelled 0
-        ;;
-    esac
+    # A delivered handoff is passed over only once its doc turn has ended:
+    # the wake itself, or a prompt typed before the doc is written, is not
+    # the person going on after it.
+    _cn_st=$(aionas_handoff_state_field "$1" 1)
+    if [ "$_cn_st" = ended ] || { [ "$_cn_st" = delivered ] && [ "$(aionas_handoff_state_field "$1" 5)" = 1 ]; }; then
+      rm -f "$(aionas_handoff_dir)/$1.done"
+      aionas_handoff_status "$1" cancelled 0
+    fi
   fi
   return 0
 }
@@ -306,7 +310,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       _sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
       # Neither /aionas-done nor the handoff instruction itself (should it
       # arrive as a prompt) is the person going on with the chat.
-      case "$(printf '%s\n' "$_flat" | aionas_json_get prompt)" in /aionas-done | "/aionas-done "* | "[aionas-handoff]"*) exit 0 ;; esac
+      case "$(printf '%s\n' "$_flat" | aionas_json_get prompt)" in /aionas-done | "/aionas-done "* | *"[aionas-handoff]"*) exit 0 ;; esac
       _aionas_sid_ok "$_sid" && aionas_handoff_cancel "$_sid"
       exit 0
       ;;

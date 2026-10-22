@@ -37,11 +37,13 @@ if aionas_policy_bypassed handoff "$_sid"; then
   exit 0
 fi
 
-# One handoff per session. After it, each turn's end moves the time the
-# session's prompt cache goes cold (the band counts down to it).
+# One live handoff per session (a prompt after its doc turn passes it over,
+# and the next idle asks again). After it, each turn's end moves the time the
+# session's prompt cache goes cold (the band counts down to it) and marks the
+# doc turn as ended.
 if [ -f "$(aionas_handoff_dir)/$_sid.done" ]; then
   if [ "$(aionas_handoff_state_field "$_sid" 1)" = delivered ]; then
-    aionas_handoff_status "$_sid" delivered "$(aionas_handoff_state_field "$_sid" 3)" $(($(aionas_now) + $(aionas_handoff_cache_ttl "$_tr")))
+    aionas_handoff_status "$_sid" delivered "$(aionas_handoff_state_field "$_sid" 3)" $(($(aionas_now) + $(aionas_handoff_cache_ttl "$_tr"))) 1
   fi
   exit 0
 fi

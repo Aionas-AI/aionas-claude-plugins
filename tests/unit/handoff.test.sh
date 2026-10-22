@@ -351,10 +351,16 @@ test_going_on_after_the_doc_passes_it_over_and_the_next_idle_asks_again() { # AI
   t_eq 2 "$(wait_rc "$RUN")"
   mkdir -p "$(hdir)"; printf 'old doc\n' >"$(hdir)/handoff-$SID.md"
   . "$HOOKS/handoff-wake.sh"
-  # the instruction itself, should it come in as a prompt, changes nothing
-  printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"[aionas-handoff] This conversation is about"}' "$SID" | bash "$HOOKS/handoff-cancel.sh"
+  # the wake as Claude Code queues it, should it come in as a prompt: nothing
+  printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"Stop hook blocking error from command \\"bash x\\": [aionas-handoff] This conversation is about"}' "$SID" | bash "$HOOKS/handoff-cancel.sh"
   t_eq delivered "$(aionas_handoff_state_field "$SID" 1)"
-  # the person goes on with the chat: the handoff is passed over
+  # a prompt typed before the doc turn ended: not yet going on after it
+  cancel_prompt
+  t_eq delivered "$(aionas_handoff_state_field "$SID" 1)" "the doc is still being written"
+  # the doc turn ends (its Stop marks it), then the person goes on: passed over
+  run_stop stop-handoff.sh "$(transcript 31000)"
+  t_eq 0 "$(wait_rc "$RUN")"
+  t_eq 1 "$(aionas_handoff_state_field "$SID" 5)" "doc turn ended"
   cancel_prompt
   t_eq cancelled "$(aionas_handoff_state_field "$SID" 1)" "the band shows no doc row"
   t_not test -e "$(hdir)/$SID.done"

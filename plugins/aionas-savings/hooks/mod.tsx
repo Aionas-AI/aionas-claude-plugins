@@ -149,6 +149,11 @@ function refresh($: EngineInterface): Promise<void> {
   return p
 }
 
+async function drawnRefresh($: EngineInterface): Promise<void> {
+  const surfaces = await $.session.surfaces().catch(() => [] as readonly string[])
+  if (surfaces.length > 0) await refresh($)
+}
+
 async function readFlag($: EngineInterface): Promise<unknown> {
   try {
     return (await $.settings.read({ source: 'flag' })).effortLevel
@@ -300,9 +305,10 @@ export const register: Register = on => {
     st.listed = refresh($)
     st.tick?.cancel()
     st.tick = undefined
-    // The 30 s refresh only where a band is drawn: an interactive session, or
-    // one a surface draws (the desktop app's sessions are not interactive).
-    if (e.isInteractive || e.surface !== null) st.tick = $.clock.every(30_000, () => void refresh($))
+    // The 30 s refresh, read only while a surface draws the band: the
+    // desktop app's sessions are not interactive, and it attaches when it
+    // likes (a reload fires session.start again without its attach).
+    st.tick = $.clock.every(30_000, () => void drawnRefresh($))
     return next(e)
   })
 
@@ -370,12 +376,6 @@ export const register: Register = on => {
   on('command.run', { command: 'aionas-done' }, async $ => {
     const r = await done($)
     return { text: r.out || 'aionas-done could not run (bash was not found).', exitCode: r.code === 0 ? 0 : 1 }
-  })
-
-  // A surface that joins later (the desktop app attaching) starts the refresh.
-  on('session.attach', async ($, e, next) => {
-    if (st.tick === undefined) st.tick = $.clock.every(30_000, () => void refresh($))
-    return next(e)
   })
 
   // A /clear goes on under a new session id with no session.start: the band

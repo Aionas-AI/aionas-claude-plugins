@@ -39,6 +39,7 @@ type World = {
   parentArgs: string
   compactAt: string
   handoff: string
+  surfaces: string[]
   now: number
   bandReads: () => number
   clock: MockClock
@@ -83,6 +84,7 @@ function world(on: On, grant: string = 'high'): World {
     parentArgs: '',
     compactAt: 'compact_at\t200000\t55',
     handoff: 'handoff\t-\t0\t0\t0',
+    surfaces: ['terminal'],
     now: T0,
     bandReads: () => reads,
     clock: mock.clock(on, { now: T0 * 1000 }),
@@ -91,6 +93,7 @@ function world(on: On, grant: string = 'high'): World {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-test-1' }))
   on('session.cwd', () => ({ value: '/work/my repo' }))
+  on('session.surfaces', () => ({ value: w.surfaces }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('env.get', ($, e) => ({ value: env.get(e.name) }))
   on('settings.read', ($, e) => ({ value: e.source === 'flag' ? w.flag : w.settings }) as never)
@@ -601,28 +604,18 @@ describe('band: chips and the one-click bypass (M3)', () => {
     expect(w.bandReads()).toBe(n + 3)
   })
 
-  test('a session that is not interactive but drawn (the desktop app) still refreshes every 30 s', async ($, on) => {
+  test('the 30 s read runs while a surface draws, interactive or not (the desktop app), and never headless', async ($, on) => {
     const w = world(on)
-    await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: false })
-    const n = w.bandReads()
-    await w.clock.advance(30_000)
-    expect(w.bandReads()).toBe(n + 1)
-  })
-
-  test('a headless session reads no band every 30 s until a surface attaches', async ($, on) => {
-    const w = world(on)
-    on('session.attach', () => ({ clientId: 'c1' }) as never)
+    w.surfaces = []
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
     const n = w.bandReads()
     await w.clock.advance(30_000)
     expect(w.bandReads()).toBe(n)
-    await $.session.attach({ surface: 'desktop', clientId: 'c1' } as never)
+    w.surfaces = ['desktop']
     await w.clock.advance(30_000)
     expect(w.bandReads()).toBe(n + 1)
   })
-})
 
-describe('band: the warning row (§3.4)', () => {
   test('context at compact_at shows the warning row with /compact; never pressed for you; isWorking hides it; Later waits 50K', async ($, on) => {
     const w = world(on)
     let compacts = 0

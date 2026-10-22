@@ -106,6 +106,7 @@ const st = {
   laterAt: 0,
   tick: undefined as { cancel: () => void } | undefined,
   countdown: undefined as { cancel: () => void } | undefined,
+  isDrawn: false,
 }
 
 function script(root: string, path: string): string {
@@ -149,7 +150,11 @@ function refresh($: EngineInterface): Promise<void> {
   return p
 }
 
+// The 30 s read, while the band is drawn: once a surface asked for it (the
+// desktop app's sessions are not interactive, and its roster may not list
+// it), or while a surface is attached.
 async function drawnRefresh($: EngineInterface): Promise<void> {
+  if (st.isDrawn) return refresh($)
   const surfaces = await $.session.surfaces().catch(() => [] as readonly string[])
   if (surfaces.length > 0) await refresh($)
 }
@@ -431,6 +436,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    st.isDrawn = true
     if (st.facts === undefined) await st.listed
     const facts = st.facts
     if (facts === undefined || facts.methods.length === 0) return next(e)

@@ -616,6 +616,17 @@ describe('band: chips and the one-click bypass (M3)', () => {
     expect(w.bandReads()).toBe(n + 1)
   })
 
+  test('a band drawn on a surface the roster does not list still reads every 30 s', async ($, on) => {
+    const w = world(on)
+    w.surfaces = []
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
+    const n = w.bandReads()
+    await w.clock.advance(30_000)
+    expect(w.bandReads()).toBe(n + 1)
+  })
+
   test('context at compact_at shows the warning row with /compact; never pressed for you; isWorking hides it; Later waits 50K', async ($, on) => {
     const w = world(on)
     let compacts = 0

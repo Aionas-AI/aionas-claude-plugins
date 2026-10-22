@@ -221,7 +221,7 @@ aionas_handoff_instruction() {
   fi
   cat <<MSG
 [aionas-handoff] $_in_lead Do this now, and nothing else:
-1. Write a handoff document for a fresh conversation to $_in_md . Start it with the line "Previous conversation: $1 (claude --resume $1 returns to it)". Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
+1. Write a handoff document for a fresh conversation to $_in_md (replace that file if it exists: an earlier doc of this chat is out of date). Start it with the line "Previous conversation: $1 (claude --resume $1 returns to it)". Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
 2. Print a short starting prompt for the new conversation (two or three sentences that point at that file).
 Do not give the developer a command or a launcher to run: once this chat is cold, the aionas band above the prompt shows "Continue in a new conversation", which opens one with that prompt.
 Do not run /compact and do not change any setting. When both are done, say the handoff is ready and stop.
@@ -251,15 +251,22 @@ aionas_handoff_deliver() {
   return 2
 }
 
-# aionas_handoff_cancel SID: a prompt arrived. It also takes back "done":
-# the person went on with the chat.
+# aionas_handoff_cancel SID: a prompt arrived: the person went on with the
+# chat. It stops a timer, takes back "done", and passes over a handoff already
+# delivered (Tal, 2026-10-22: one handoff per chat, and the one that counts is
+# the latest): the band stops showing it, and when the chat is idle again a
+# new doc is asked for, written over the old one at the same path.
 aionas_handoff_cancel() {
   if aionas_handoff_disarm "$1"; then
     aionas_handoff_status "$1" cancelled 0
     aionas_counter_inc handoff skipped >/dev/null 2>&1
-  elif [ "$(aionas_handoff_state_field "$1" 1)" = ended ]; then
-    rm -f "$(aionas_handoff_dir)/$1.done"
-    aionas_handoff_status "$1" cancelled 0
+  else
+    case "$(aionas_handoff_state_field "$1" 1)" in
+      ended | delivered)
+        rm -f "$(aionas_handoff_dir)/$1.done"
+        aionas_handoff_status "$1" cancelled 0
+        ;;
+    esac
   fi
   return 0
 }
@@ -297,8 +304,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       _in=$(cat 2>/dev/null)
       _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)
       _sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
-      # /aionas-done itself is no new message: it must not take "done" back.
-      case "$(printf '%s\n' "$_flat" | aionas_json_get prompt)" in /aionas-done | "/aionas-done "*) exit 0 ;; esac
+      # Neither /aionas-done nor the handoff instruction itself (should it
+      # arrive as a prompt) is the person going on with the chat.
+      case "$(printf '%s\n' "$_flat" | aionas_json_get prompt)" in /aionas-done | "/aionas-done "* | "[aionas-handoff]"*) exit 0 ;; esac
       _aionas_sid_ok "$_sid" && aionas_handoff_cancel "$_sid"
       exit 0
       ;;

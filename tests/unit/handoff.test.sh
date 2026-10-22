@@ -345,6 +345,26 @@ test_typed_aionas_done_is_not_a_new_message() { # AIO-874
   t_eq cancelled "$(aionas_handoff_state_field "$SID" 1)" "a real message takes it back"
 }
 
+test_going_on_after_the_doc_passes_it_over_and_the_next_idle_asks_again() { # AIO-874, Tal 2026-10-22
+  policy_low
+  run_stop handoff-arm.sh "$(transcript 30000)"
+  t_eq 2 "$(wait_rc "$RUN")"
+  mkdir -p "$(hdir)"; printf 'old doc\n' >"$(hdir)/handoff-$SID.md"
+  . "$HOOKS/handoff-wake.sh"
+  # the instruction itself, should it come in as a prompt, changes nothing
+  printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"[aionas-handoff] This conversation is about"}' "$SID" | bash "$HOOKS/handoff-cancel.sh"
+  t_eq delivered "$(aionas_handoff_state_field "$SID" 1)"
+  # the person goes on with the chat: the handoff is passed over
+  cancel_prompt
+  t_eq cancelled "$(aionas_handoff_state_field "$SID" 1)" "the band shows no doc row"
+  t_not test -e "$(hdir)/$SID.done"
+  # idle again: a new instruction, for the same doc path (it is written over)
+  run_stop stop-handoff.sh "$(transcript 32000)"
+  t_eq 2 "$(wait_rc "$RUN")" "asked again"
+  t_contains "$(cat "$RUN/err")" "$(hdir)/handoff-$SID.md"
+  t_eq 2 "$(queue | grep -c 'handoff	fired')" "two deliveries counted"
+}
+
 test_done_after_the_doc_changes_nothing() { # AIO-874
   policy_low
   run_stop handoff-arm.sh "$(transcript 30000)"

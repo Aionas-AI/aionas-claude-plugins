@@ -684,6 +684,15 @@ describe('band: the handoff row (AIO-874)', () => {
     expect(await ui.find({ type: 'Text', text: '▲ Context 214K of 1M. Compact recommended.' })).toBeDefined()
   })
 
+  test('a timer of an older version (no deadline) counts down from its arm time + the idle minutes', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    w.handoff = `handoff\tarmed\t0\t0\t0\t${T0 - 5 * 60}`
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ type: 'Text', text: '◷ Handoff doc in 50 min if this chat stays idle.' })).toBeDefined()
+  })
+
   test('/aionas-done does the same without a model turn', async ($, on) => {
     const w = world(on)
     await start($)

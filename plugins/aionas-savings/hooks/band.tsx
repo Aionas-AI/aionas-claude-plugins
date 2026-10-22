@@ -128,6 +128,7 @@ export const parseBand = (out: string): Facts => {
     gatewayHost: undefined,
     handoff: { status: undefined, due: 0, coldAt: 0, hasDoc: false },
   }
+  let armedAt = 0
   for (const line of out.split('\n')) {
     const p = line.split('\t')
     switch (p[0]) {
@@ -185,12 +186,17 @@ export const parseBand = (out: string): Facts => {
           coldAt: int(p[3]),
           hasDoc: p[4] === '1',
         }
+        armedAt = int(p[5])
         break
       case 'gateway_host':
         f.gatewayHost = p[1] !== undefined && p[1] !== '-' && p[1] !== '' ? p[1].toLowerCase() : undefined
         break
     }
   }
+  // A timer of an older version writes no deadline: it is the arm time plus
+  // the idle minutes (at most 58, the Stop hook's own bound).
+  if (f.handoff.status === 'armed' && f.handoff.due === 0 && armedAt > 0)
+    f.handoff.due = armedAt + Math.min(f.idleMinutes * 60, 3480)
   return f
 }
 

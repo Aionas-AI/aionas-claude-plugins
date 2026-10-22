@@ -6,6 +6,7 @@
 #   handoff-wake.sh prepare SESSION [CWD]  print the handoff instruction and write the launcher (/aionas-handoff)
 #   handoff-wake.sh end SESSION            "Done with this chat" (/aionas-done): no handoff doc for this session
 #   handoff-wake.sh prompt SESSION         print the starting prompt of the new conversation (exit 1: no doc yet)
+#   handoff-wake.sh open-app URL           open a new desktop-app session (claude://code/new?... only)
 #
 # State, under $(aionas_savings_dir)/handoff/ (numbers and names only, never content):
 #   <sid>.armed   the token of the one live timer; a timer whose token differs, or whose file is gone, quits
@@ -307,6 +308,17 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     prompt)
       _aionas_sid_ok "${2:-}" || exit 1
       aionas_handoff_start_prompt "$2"
+      exit $?
+      ;;
+    open-app)
+      # The desktop app's own link for a new Code session, with its first
+      # message (q) and folder; nothing else is opened.
+      case "${2:-}" in "claude://code/new?"*) ;; *) exit 2 ;; esac
+      case "$(aionas_os)" in
+        darwin) open "$2" ;;
+        windows) AIONAS_URL="$2" powershell.exe -NoProfile -NonInteractive -Command 'Start-Process $env:AIONAS_URL' ;;
+        *) exit 1 ;;
+      esac
       exit $?
       ;;
   esac

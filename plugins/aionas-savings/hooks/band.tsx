@@ -89,7 +89,7 @@ export const TIPS: Record<string, string> = {
   output_store: 'Long output: Claude sees only its start, its end and the errors.',
   handoff: 'A long chat left idle gets a note to go on in a new session.',
   handoff_done: 'Writes no handoff doc for this session. A new message here takes it back.',
-  handoff_new: 'Starts a new conversation with the doc. The old one is kept: /resume goes back to it.',
+  handoff_new: 'Opens a new conversation that starts from the doc. This one is kept, so you can come back to it.',
   unused_services: 'Tools unused for 30 days are turned off; /mcp turns one back on.',
   write_minimum: 'Claude writes only what the task needs.',
   saved:

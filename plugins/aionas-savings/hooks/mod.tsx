@@ -24,9 +24,11 @@
 // - The handoff row (AIO-874): the minutes left until the handoff doc, with
 //   "Done with this chat" (also /aionas-done: no doc for this session); after
 //   the doc, the minutes left until the session's prompt cache runs out; once
-//   cold, "Continue in a new conversation": /clear (a new session id; the old
-//   session stays, /resume returns to it) and the starting prompt that names
-//   the doc put in the prompt box for the person to send.
+//   cold, "Continue in a new conversation": in the desktop app a new session
+//   of its own (the app's claude://code/new link: the starting prompt that
+//   names the doc, this folder) while this one stays in the list; in the
+//   terminal /clear (a new session id; /resume returns to the old one) and
+//   the starting prompt put in the prompt box. The person sends it.
 //
 // Privacy (W24-4): nothing here sends anything; the scripts send only method
 // ids, durations, closed-set params and a reason the person typed. The band
@@ -222,15 +224,25 @@ async function done($: EngineInterface): Promise<Ran> {
   return r
 }
 
-// "Continue in a new conversation": /clear starts one under a new session id
-// (the old one is kept, /resume returns to it) and the starting prompt that
-// names the handoff doc goes in the prompt box. Where /clear or the box
-// cannot be used, the prompt is copied instead.
+// "Continue in a new conversation". Where neither way works, the starting
+// prompt is copied for the person to paste.
 async function newChat($: EngineInterface, surface: string | undefined): Promise<void> {
   const old = st.sid
   const r = await handoff($, ['prompt', old])
   if (r.code !== 0 || r.out === '') {
     $.ui.toast('The handoff doc of this chat was not found.')
+    return
+  }
+  if (surface !== 'terminal') {
+    const cwd = await $.session.cwd()
+    const url = `claude://code/new?q=${encodeURIComponent(r.out)}&folder=${encodeURIComponent(cwd)}`
+    const o = await handoff($, ['open-app', url])
+    if (o.code === 0) {
+      $.ui.toast('A new session opened with the handoff doc. This one stays in your list, so you can come back to it.')
+      return
+    }
+    await $.ui.copy({ text: r.out, ...(surface === undefined ? {} : { surface: surface as never }) }).catch(() => undefined)
+    $.ui.toast('The starting prompt is copied: paste it into a new session.')
     return
   }
   let isCleared = true

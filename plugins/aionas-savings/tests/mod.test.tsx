@@ -90,6 +90,7 @@ function world(on: On, grant: string = 'high'): World {
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-test-1' }))
+  on('session.cwd', () => ({ value: '/work/my repo' }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('env.get', ($, e) => ({ value: env.get(e.name) }))
   on('settings.read', ($, e) => ({ value: e.source === 'flag' ? w.flag : w.settings }) as never)
@@ -706,18 +707,42 @@ describe('band: the handoff row (AIO-874)', () => {
     })
     w.handoff = `handoff\tdelivered\t0\t${T0 + 30 * 60}\t1`
     await start($)
-    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: '◷ Handoff doc written. This chat goes cold in 30 min.' })).toBeDefined()
     expect(await ui.find({ key: 'aionas-handoff-new' })).toBeUndefined()
     w.now += 30 * 60
     await w.clock.advance(15_000)
     expect(await ui.find({ type: 'Text', text: '◷ This chat is cold: going on here reads all of it again.' })).toBeDefined()
-    expect(textOf(await cardOf(ui, 'handoff_new'))).toContain('/resume goes back to it')
+    expect(textOf(await cardOf(ui, 'handoff_new', 'terminal'))).toContain('This one is kept')
     await ui.press({ key: 'aionas-handoff-new' })
     await w.clock.settle()
     expect(commands).toEqual(['clear'])
     expect(fills).toEqual(['Continue the work described in the handoff document /h/handoff-sess-test-1.md. Read it fully first.'])
     expect(w.toasts.at(-1)).toBe('New conversation: press Enter to start it. The old one is kept: /resume sess-test-1 goes back to it.')
+  })
+
+  test('in the desktop app, continue opens a session of its own through the app link; this one stays', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    let clears = 0
+    on('command.run', { command: 'clear' }, () => {
+      clears += 1
+      return { text: '' }
+    })
+    w.handoff = `handoff\tdelivered\t0\t${T0 - 60}\t1`
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(textOf(await cardOf(ui, 'handoff_new', 'desktop'))).toContain('This one is kept')
+    await ui.press({ key: 'aionas-handoff-new' })
+    await w.clock.settle()
+    const opened = scriptRuns(w, 'hooks/handoff-wake.sh').at(-1) as string[]
+    expect(opened.slice(-2, -1)).toEqual(['open-app'])
+    const url = new URL(opened.at(-1) as string)
+    expect(url.protocol + url.host + url.pathname).toBe('claude:code/new')
+    expect(url.searchParams.get('q')).toBe('Continue the work described in the handoff document /h/handoff-sess-test-1.md. Read it fully first.')
+    expect(url.searchParams.get('folder')).toBe('/work/my repo')
+    expect(clears).toBe(0)
+    expect(w.toasts.at(-1)).toMatch(/^A new session opened with the handoff doc/)
   })
 
   test('no doc yet, handoff off, or done: no row', async ($, on) => {

@@ -343,6 +343,17 @@ test_start_prompt_needs_the_doc() { # AIO-874
   t_rc 1 bash "$HOOKS/handoff-wake.sh" prompt "../x"
 }
 
+test_open_app_opens_only_the_new_session_link() { # AIO-874
+  t_rc 2 bash "$HOOKS/handoff-wake.sh" open-app "https://example.com/x"
+  t_rc 2 bash "$HOOKS/handoff-wake.sh" open-app "claude://code/continue?session=last"
+  t_rc 2 bash "$HOOKS/handoff-wake.sh" open-app ""
+  mkdir -p "$HOME/bin"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"%s/opened"\n' "$HOME" >"$HOME/bin/open"; chmod +x "$HOME/bin/open"
+  AIONAS_UNAME="$HOME/bin/darwin" PATH="$HOME/bin:$PATH" bash -c 'printf "#!/usr/bin/env bash\necho Darwin\n" >"$HOME/bin/darwin"; chmod +x "$HOME/bin/darwin"'
+  AIONAS_UNAME="$HOME/bin/darwin" PATH="$HOME/bin:$PATH" bash "$HOOKS/handoff-wake.sh" open-app 'claude://code/new?q=a%20b&folder=%2Fx'
+  t_eq 'claude://code/new?q=a%20b&folder=%2Fx' "$(cat "$HOME/opened")" "the URL as one argument"
+}
+
 test_instruction_names_the_previous_conversation() { # AIO-874
   t_contains "$(bash "$HOOKS/handoff-wake.sh" prepare "$SID" "$HOME")" "Previous conversation: $SID (claude --resume $SID returns to it)"
 }

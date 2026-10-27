@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # aionas-savings hook: long-output store (PostToolUse). Owner: AIO-860.
+# Both this and pretool-guard.sh are the output_trim method (AIO-883): off
+# unless the organization turns it on.
 #
 # For a Bash result only (other tools, and so every file read used for an
 # edit, stay untouched):
-#   - a sed/grep/cat command (a cap rule of the guard, noisy_guard on) whose
+#   - a sed/grep/cat command (a cap rule of the guard) whose
 #     output is over cap_tokens is cut to whole lines within the cap, ending
 #     with "[aionas-guard: capped <rule> ..."; the command itself is never
 #     rewritten (an AIONAS_GUARD= prefix would stop the person's allow rules
@@ -44,17 +46,18 @@ sid=$(aionas_json_get session_id <"$tmp/flat")
 bpt=$(aionas_gs_int "$(aionas_gs_setting bytes_per_token 4)" 4)
 IFS=$'\037' read -r status rule kind _new _gid prog full < <(aionas_gs_match "$tmp/cmd")
 
-# Which method acts on this output: the guard's cap (a sed/grep/cat rule,
-# when noisy_guard is on), or the store.
+# How output_trim acts on this output: the guard's cap (a sed/grep/cat rule)
+# or the store.
 [ "$prog" = aionas-recall ] && exit 0 # the model asked for exactly this
-method=output_store
+method=output_trim
+mode=store
 case "$status" in match | bypass | guarded)
-  if [ "$kind" = cap ] && aionas_policy_active noisy_guard "$sid"; then method=noisy_guard; fi ;;
+  if [ "$kind" = cap ]; then mode=cap; fi ;;
 esac
-if [ "$method" = noisy_guard ]; then
-  tokens=$(aionas_gs_int "$(aionas_policy_param noisy_guard cap_tokens "$sid" 2>/dev/null)" "$(aionas_gs_int "$(aionas_gs_setting cap_tokens 1500)" 1500)")
+if [ "$mode" = cap ]; then
+  tokens=$(aionas_gs_int "$(aionas_policy_param output_trim cap_tokens "$sid" 2>/dev/null)" "$(aionas_gs_int "$(aionas_gs_setting cap_tokens 1500)" 1500)")
 else
-  tokens=$(aionas_gs_int "$(aionas_policy_param output_store threshold_tokens "$sid" 2>/dev/null)" "$(aionas_gs_int "$(aionas_gs_setting store_tokens 2000)" 2000)")
+  tokens=$(aionas_gs_int "$(aionas_policy_param output_trim threshold_tokens "$sid" 2>/dev/null)" "$(aionas_gs_int "$(aionas_gs_setting store_tokens 2000)" 2000)")
 fi
 limit=$((tokens * bpt))
 
@@ -85,7 +88,7 @@ id="out_$(aionas_gs_hash "$tmp/body")"
 case "$id" in out_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) exit 0 ;; esac
 
 keep=$(aionas_gs_int "$(aionas_gs_setting keep_lines_max 40)" 40)
-if [ "$method" = noisy_guard ]; then
+if [ "$mode" = cap ]; then
   LC_ALL=C awk -v mode=cap -v full="$size" -v id="$id" -v rule="$rule" -v budget="$limit" -v tokens="$tokens" -v keep="$keep" \
     -f "$AIONAS_GS_HOOKS/posttool-store.awk" "$tmp/out" >"$tmp/view" || exit 0
 else

@@ -8,7 +8,7 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 
 - the handoff document,
 - effort capped at high, with the `/aionas-xhigh` window that allows xhigh or max for sessions opened in the next 10 minutes,
-- the noisy-command guard and the long-output store,
+- tool output trimming (`output_trim`): the noisy-command guard and the long-output store as one method, off unless the organization turns it on (0.2.0, AIO‑883),
 - the "write the minimum" skill.
 
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
@@ -46,8 +46,8 @@ tests/                                   make test
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |
 | UserPromptSubmit | `handoff-cancel.sh` | 5 s | AIO‑858 |
-| PreToolUse (Bash) | `noisy-guard.sh` | 10 s | AIO‑860 |
-| PostToolUse | `output-store.sh` | 30 s | AIO‑860 |
+| PreToolUse (Bash) | `noisy-guard.sh` | 10 s | AIO‑860, `output_trim` (AIO‑883) |
+| PostToolUse | `output-store.sh` | 30 s | AIO‑860, `output_trim` (AIO‑883) |
 | Stop | `handoff-arm.sh` | asyncRewake | AIO‑858 |
 | Stop | `counters-flush.sh` | async | AIO‑855 |
 

@@ -24,7 +24,7 @@ const BAND = {
 } as const
 
 type M = { state: 'on' | 'off'; active: 0 | 1; so: 0 | 1; released: 0 | 1; until: number; pending: 0 | 1; fired: number }
-const ORDER = ['effort_default', 'subagent_sonnet', 'noisy_guard', 'output_store', 'handoff', 'unused_services', 'write_minimum']
+const ORDER = ['effort_default', 'subagent_sonnet', 'output_trim', 'handoff', 'unused_services', 'write_minimum']
 
 type World = {
   argv: string[][]
@@ -70,7 +70,7 @@ function world(on: On, grant: string = 'high'): World {
   const methods: Record<string, M> = {}
   for (const id of ORDER) methods[id] = { state: 'on', active: 1, so: 1, released: 0, until: 0, pending: 0, fired: 0 }
   methods.handoff = { ...(methods.handoff as M), state: 'off', active: 0 }
-  methods.noisy_guard = { ...(methods.noisy_guard as M), fired: 4 }
+  methods.output_trim = { ...(methods.output_trim as M), fired: 4 }
   const w: World = {
     argv: [],
     envSets: [],
@@ -128,7 +128,7 @@ function world(on: On, grant: string = 'high'): World {
         w.methods[id] = { ...m, pending: 1 }
         stdout = `${id}: sent for approval to your org admin or lead. It applies from your next session once approved.`
       }
-    } else if (a.includes('aionas-bypass.sh')) stdout = 'noisy_guard is off for you for 1 hour, from now. Reason: debugging a flaky test.'
+    } else if (a.includes('aionas-bypass.sh')) stdout = 'output_trim is off for you for 1 hour, from now. Reason: debugging a flaky test.'
     else if (a.includes('handoff-wake.sh end')) {
       w.handoff = 'handoff\tended\t0\t0\t0'
       stdout = 'Done: no handoff doc will be written for this chat. A new message here takes it back.'
@@ -223,7 +223,7 @@ describe('band: one line and the full view (M1)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · Acme · mbp-noa · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
-      expect((await chipText(ui, 'noisy_guard'))).toContain('● guard')
+      expect((await chipText(ui, 'output_trim'))).toContain('● trim')
       expect((await chipText(ui, 'effort_default'))).toBe('● medium · allow more')
       expect((await chipText(ui, 'subagent_sonnet'))).toContain('● sonnet subagents')
       expect(await ui.find({ type: 'Text', text: /^○ handoff$/ })).toBeDefined()
@@ -237,7 +237,7 @@ describe('band: one line and the full view (M1)', () => {
       expect(
         await ui.find({ type: 'Text', text: 'saved since 8 Oct (13 days) ~$46.20 · today ~$3.80 · estimated · updated 13:05' }),
       ).toBeDefined()
-      expect((await chipText(ui, 'noisy_guard'))).toContain('● guard · 4 today')
+      expect((await chipText(ui, 'output_trim'))).toContain('● trim · 4 today')
       expect((await ui.find({ key: 'aionas-xhigh' }))?.props.label).toBe('allow higher effort for 10 min')
       expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
 
@@ -257,7 +257,7 @@ describe('band: one line and the full view (M1)', () => {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /^aionas │ subscription │$/ })).toBeDefined()
       expect(await ui.find({ text: /saved since|No saving/ })).toBeUndefined()
-      expect(await ui.find({ key: 'aionas-chip-noisy_guard' })).toBeDefined()
+      expect(await ui.find({ key: 'aionas-chip-output_trim' })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -289,19 +289,20 @@ describe('band: one line and the full view (M1)', () => {
   })
 
   test('narrow widths drop the computer, then the org, then the chips past the fourth (+N)', async ($, on) => {
+    // The widths moved by 13 columns when output_trim replaced the guard and store chips (AIO-883).
     world(on)
     await start($)
     for (const surface of SURFACES) {
-      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 209 } })
+      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 196 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · mbp-noa · subscription │/ })).toBeDefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 208 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 195 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · subscription │/ })).toBeDefined()
       expect(await ui.find({ text: /mbp-noa/ })).toBeUndefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 194 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 181 } })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct/ })).toBeDefined()
       expect(await ui.find({ text: /Acme/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeDefined()
@@ -310,9 +311,10 @@ describe('band: one line and the full view (M1)', () => {
       ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 60 } })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
       expect(await ui.find({ text: /Acme|mbp-noa/ })).toBeUndefined()
-      expect(await ui.find({ key: 'aionas-chip-output_store' })).toBeDefined()
+      // Six chips since output_trim (AIO-883): four drawn, two more.
+      expect(await ui.find({ key: 'aionas-chip-output_trim' })).toBeDefined()
       expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeUndefined()
-      expect(await ui.find({ type: 'Text', text: '+3' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '+2' })).toBeDefined()
       expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
       await ui.unmount()
     }
@@ -396,15 +398,15 @@ describe('band: chips and the one-click bypass (M3)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       const before = scriptRuns(w, 'commands/aionas-bypass.sh').length
-      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      await ui.press({ key: 'aionas-chip-output_trim' })
       const runs = scriptRuns(w, 'commands/aionas-bypass.sh').slice(before)
-      expect(runs[0]?.slice(-2)).toEqual(['noisy_guard', '1h'])
+      expect(runs[0]?.slice(-2)).toEqual(['output_trim', '1h'])
       expect(runs.some(a => a.includes('--band'))).toBe(true)
-      expect((await chipText(ui, 'noisy_guard'))).toContain('◌ guard · off until 14:00')
-      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      expect((await chipText(ui, 'output_trim'))).toContain('◌ trim · off until 14:00')
+      await ui.press({ key: 'aionas-chip-output_trim' })
       const ended = scriptRuns(w, 'commands/aionas-bypass.sh').find(a => a.includes('--end'))
-      expect(ended?.slice(-2)).toEqual(['--end', 'noisy_guard'])
-      expect((await chipText(ui, 'noisy_guard'))).toContain('● guard')
+      expect(ended?.slice(-2)).toEqual(['--end', 'output_trim'])
+      expect((await chipText(ui, 'output_trim'))).toContain('● trim')
       expect(w.toasts.some(t => t.includes('back on'))).toBe(true)
       expect(w.toasts.some(t => t.includes('off for you for 1 hour'))).toBe(true)
       await ui.unmount()
@@ -413,16 +415,16 @@ describe('band: chips and the one-click bypass (M3)', () => {
 
   test('a method whose self-override the admin blocked becomes a request: request pending, display only', async ($, on) => {
     const w = world(on)
-    ;(w.methods.output_store as M).so = 0
+    ;(w.methods.write_minimum as M).so = 0
     await start($)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-    await ui.press({ key: 'aionas-chip-output_store' })
-    expect(await ui.find({ key: 'aionas-chip-output_store' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: '◌ store · request pending' })).toBeDefined()
+    await ui.press({ key: 'aionas-chip-write_minimum' })
+    expect(await ui.find({ key: 'aionas-chip-write_minimum' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '◌ write-min · request pending' })).toBeDefined()
     await ui.unmount()
     for (const surface of SURFACES) {
       const again = await $.ui.mount({ ...BAND, surface })
-      expect(await again.find({ type: 'Text', text: '◌ store · request pending' })).toBeDefined()
+      expect(await again.find({ type: 'Text', text: '◌ write-min · request pending' })).toBeDefined()
       await again.unmount()
     }
   })
@@ -509,12 +511,12 @@ describe('band: chips and the one-click bypass (M3)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
       await expectTip(ui, surface, 'saved', TIPS_SAVED)
-      await expectTip(ui, surface, 'noisy_guard', 'Noisy commands are shortened. Click: off for you for 1 hour.')
+      await expectTip(ui, surface, 'output_trim', 'Noisy commands are shortened; long output shows only its start, its end and the errors. Click: off for you for 1 hour.')
       await expectTip(ui, surface, 'effort_default', 'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max.')
       await expectTip(ui, surface, 'handoff', 'Off now. A long chat left idle gets a note to go on in a new session.')
-      await ui.press({ key: 'aionas-chip-noisy_guard' })
-      await expectTip(ui, surface, 'noisy_guard', 'Noisy commands are shortened. Click: back on.')
-      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      await ui.press({ key: 'aionas-chip-output_trim' })
+      await expectTip(ui, surface, 'output_trim', 'Noisy commands are shortened; long output shows only its start, its end and the errors. Click: back on.')
+      await ui.press({ key: 'aionas-chip-output_trim' })
       await ui.press({ key: 'aionas-chip-effort_default' })
       await expectTip(ui, surface, 'effort_default', TIPS_WINDOW)
       w.window = 'window\t-\t0\thigh'
@@ -541,12 +543,12 @@ describe('band: chips and the one-click bypass (M3)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       const glyph = async (id: string) => (await ui.find({ key: `aionas-tipat-${id}` })).children[0].children[0]
-      expect((await glyph('noisy_guard')).props.color).toBe('success')
-      expect((await ui.find({ key: 'aionas-chip-noisy_guard' })).props.dimColor).toBe(false)
-      await ui.press({ key: 'aionas-chip-noisy_guard' })
-      expect((await glyph('noisy_guard')).props.dimColor).toBe(true)
-      expect((await ui.find({ key: 'aionas-chip-noisy_guard' })).props.dimColor).toBe(true)
-      await ui.press({ key: 'aionas-chip-noisy_guard' })
+      expect((await glyph('output_trim')).props.color).toBe('success')
+      expect((await ui.find({ key: 'aionas-chip-output_trim' })).props.dimColor).toBe(false)
+      await ui.press({ key: 'aionas-chip-output_trim' })
+      expect((await glyph('output_trim')).props.dimColor).toBe(true)
+      expect((await ui.find({ key: 'aionas-chip-output_trim' })).props.dimColor).toBe(true)
+      await ui.press({ key: 'aionas-chip-output_trim' })
       const off = await ui.find({ key: 'aionas-tipat-handoff' })
       expect(off.children[0].props.dimColor).toBe(true)
       await ui.unmount()
@@ -806,10 +808,10 @@ describe('commands', () => {
   test('/aionas-bypass runs the script by argument vector and prints its line', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
-    const r = await $.command.run({ command: 'aionas-bypass', args: 'noisy_guard 2h debugging a flaky test; rm x' } as never)
-    expect(r.text).toContain('noisy_guard is off')
-    const ran = w.argv.find(a => a.some(x => x.endsWith('commands/aionas-bypass.sh')) && a.includes('noisy_guard'))
-    expect(ran?.slice(2)).toEqual(['noisy_guard', '2h', 'debugging', 'a', 'flaky', 'test;', 'rm', 'x'])
+    const r = await $.command.run({ command: 'aionas-bypass', args: 'output_trim 2h debugging a flaky test; rm x' } as never)
+    expect(r.text).toContain('output_trim is off')
+    const ran = w.argv.find(a => a.some(x => x.endsWith('commands/aionas-bypass.sh')) && a.includes('output_trim'))
+    expect(ran?.slice(2)).toEqual(['output_trim', '2h', 'debugging', 'a', 'flaky', 'test;', 'rm', 'x'])
   })
 
   test('/aionas-xhigh runs the script and prints its line', async ($, on) => {

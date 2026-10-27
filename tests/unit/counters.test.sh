@@ -5,22 +5,22 @@ T0=1792490400 # 2026-10-20T10:00:00Z
 CD() { echo "$(aionas_savings_dir)/counters"; }
 
 test_inc_rejects_names_outside_closed_lists() {
-  t_rc 2 aionas_counter_inc long_output_store fired
-  t_rc 2 aionas_counter_inc noisy_guard prompt_text
-  t_rc 2 aionas_counter_inc noisy_guard fired 0
-  t_rc 2 aionas_counter_inc noisy_guard fired -1
-  t_rc 2 aionas_counter_inc noisy_guard fired 'rm -rf'
-  t_rc 2 aionas_counter_inc noisy_guard fired 1000001
+  t_rc 2 aionas_counter_inc long_output_trim fired
+  t_rc 2 aionas_counter_inc output_trim prompt_text
+  t_rc 2 aionas_counter_inc output_trim fired 0
+  t_rc 2 aionas_counter_inc output_trim fired -1
+  t_rc 2 aionas_counter_inc output_trim fired 'rm -rf'
+  t_rc 2 aionas_counter_inc output_trim fired 1000001
   t_ok test ! -e "$(CD)/queue.tsv"
 }
 
 test_flush_sends_summed_numbers_only() {
   t_enroll
   export AIONAS_NOW=$T0
-  aionas_counter_inc noisy_guard fired
-  aionas_counter_inc noisy_guard fired 2
-  aionas_counter_inc output_store bypass
-  AIONAS_NOW=$((T0 - 86400)) aionas_counter_inc noisy_guard fired
+  aionas_counter_inc output_trim fired
+  aionas_counter_inc output_trim fired 2
+  aionas_counter_inc output_trim bypass
+  AIONAS_NOW=$((T0 - 86400)) aionas_counter_inc output_trim fired
   t_rc 0 aionas_counters_flush
   t_eq POST "$(t_call 1 method)"
   t_eq https://gw.example.test/enroll/v1/savings/counters "$(t_call 1 url)"
@@ -29,7 +29,7 @@ test_flush_sends_summed_numbers_only() {
   local args; args=$(t_call 1 args | tr '\n' ' ')
   t_contains "$args" "--connect-timeout 3 "
   t_contains "$args" "--max-time 5 "
-  t_eq '{"plugin_version":"0.1.4","counters":[{"day":"2026-10-20","method_id":"noisy_guard","counter":"fired","value":3},{"day":"2026-10-20","method_id":"output_store","counter":"bypass","value":1},{"day":"2026-10-19","method_id":"noisy_guard","counter":"fired","value":1}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.2.0","counters":[{"day":"2026-10-20","method_id":"output_trim","counter":"fired","value":3},{"day":"2026-10-20","method_id":"output_trim","counter":"bypass","value":1},{"day":"2026-10-19","method_id":"output_trim","counter":"fired","value":1}]}' "$(t_call 1 body)"
   t_ok test ! -e "$(CD)/pending.tsv"
   t_eq "$T0" "$(cat "$(CD)/last_sent")"
 }
@@ -40,13 +40,13 @@ test_body_is_strictly_names_and_numbers() {
   local m c
   for m in $AIONAS_METHODS; do for c in $AIONAS_COUNTERS; do aionas_counter_inc "$m" "$c" 7; done; done
   # a corrupted queue line must never reach the server
-  printf '2026-10-20\tnoisy_guard\tfired\t1\tsecret prompt\n2026-10-20\tnoisy_guard\tsecret\t1\n' >>"$(CD)/queue.tsv"
+  printf '2026-10-20\toutput_trim\tfired\t1\tsecret prompt\n2026-10-20\toutput_trim\tsecret\t1\n' >>"$(CD)/queue.tsv"
   t_rc 0 aionas_counters_flush
   local body; body=$(t_call 1 body)
   t_lacks "$body" secret
   local rest
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"[a-z_]+","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.1.4","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.1.4"/"0.1.4",/')"
+  t_eq '{"plugin_version":"0.2.0","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.2.0"/"0.2.0",/')"
 }
 
 test_flush_is_hourly() {

@@ -25,7 +25,13 @@ policy() {
   export FAKE_CURL_STATUS=200 FAKE_CURL_BODY="$HOME/policy.json"
   t_rc 0 aionas_policy_sync
 }
-setup() { export AIONAS_CC_VERSION=2.1.299; }
+# trim_on: a cached policy with output_trim on (it is off with nothing
+# cached, AIO-883); a test that syncs its own policy replaces it.
+trim_on() {
+  aionas_mkdir "$(aionas_savings_dir)" &&
+    printf 'V\t1\nM\toutput_trim\ton\t0\t1\t1\t0\n' >"$(aionas_savings_dir)/policy.cache"
+}
+setup() { export AIONAS_CC_VERSION=2.1.299; trim_on; }
 
 test_rule_file_is_versioned_and_well_formed() {
   t_eq 1 "$(awk -F '\t' '$1 == "version" { print $2 }' "$RULES")"
@@ -112,13 +118,13 @@ test_quiet_rewrite_counts_fired_a_cap_rule_does_not() {
   pre 'pytest' >/dev/null
   pre 'cat big.log' >/dev/null
   pre 'ls' >/dev/null
-  t_eq "noisy_guard fired 1" "$(queue)"
+  t_eq "output_trim fired 1" "$(queue)"
 }
 
 test_bypass_runs_unchanged_and_writes_one_counter() {
   setup
   t_eq "" "$(pre 'AIONAS_FULL=1 git log')"
-  t_eq "noisy_guard bypass 1" "$(queue)"
+  t_eq "output_trim bypass 1" "$(queue)"
   # A command no rule rewrites is not a guard bypass here (a cap rule's
   # bypass is counted by posttool-store.sh, when there was something to cut).
   t_eq "" "$(pre 'AIONAS_FULL=1 ls')"
@@ -128,21 +134,21 @@ test_bypass_runs_unchanged_and_writes_one_counter() {
 
 test_blocked_self_override_keeps_the_guard_and_points_to_a_request() {
   setup
-  policy '{"methods":[{"method_id":"noisy_guard","state":"on","required":false,"self_override_allowed":false,"self_release_allowed":true}],"overrides":[]}'
+  policy '{"methods":[{"method_id":"output_trim","state":"on","required":false,"self_override_allowed":false,"self_release_allowed":true}],"overrides":[]}'
   local out f
   out=$(pre 'AIONAS_FULL=1 git log')
   f=$(aionas_json_flatten <<<"$out") || t_fail "not JSON: $out"
   t_eq "AIONAS_GUARD=git_log AIONAS_FULL=1 git log -n 30 --oneline" "$(aionas_json_get hookSpecificOutput.updatedInput.command <<<"$f")"
-  t_contains "$(aionas_json_get hookSpecificOutput.additionalContext <<<"$f")" "/aionas-bypass noisy_guard"
-  t_eq "noisy_guard fired 1" "$(queue)"
+  t_contains "$(aionas_json_get hookSpecificOutput.additionalContext <<<"$f")" "/aionas-bypass output_trim"
+  t_eq "output_trim fired 1" "$(queue)"
 }
 
 test_method_off_or_bypassed_changes_nothing() {
   setup
-  policy '{"methods":[{"method_id":"noisy_guard","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
+  policy '{"methods":[{"method_id":"output_trim","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
   t_eq "" "$(pre 'git log')"
   policy '{"methods":[],"overrides":[]}'
-  t_ok aionas_override_local_add noisy_guard 600
+  t_ok aionas_override_local_add output_trim 600
   t_eq "" "$(pre 'git log')"
   t_eq "" "$(queue)"
 }
@@ -150,6 +156,7 @@ test_method_off_or_bypassed_changes_nothing() {
 test_cap_rules_never_rewrite_and_quiet_rules_need_no_version() {
   # A prefix would stop the person's Bash(cat:*) allow rule from matching.
   local v
+  trim_on
   for v in 2.1.100 2.1.299 2.2.0; do
     export AIONAS_CC_VERSION=$v
     t_eq "" "$(pre 'cat big.log')"
@@ -157,6 +164,14 @@ test_cap_rules_never_rewrite_and_quiet_rules_need_no_version() {
     t_eq "" "$(pre 'sed -n 1,9p f')"
     t_eq "AIONAS_GUARD=git_log git log -n 30 --oneline" "$(new_cmd 'git log')"
   done
+}
+
+# AIO-883: with no policy cached, output_trim is off and no command is rewritten.
+test_output_trim_is_off_by_default() {
+  export AIONAS_CC_VERSION=2.1.299
+  t_eq "" "$(pre 'git log')"
+  t_eq "" "$(pre 'pytest')"
+  t_eq "" "$(queue)" "nothing counted"
 }
 
 test_other_tools_and_bad_input_change_nothing() {

@@ -14,11 +14,11 @@ test_policy_sync_pins_old_policy_then_fetches_new_one() {
   local out; out=$(hook policy-sync.sh)
   t_eq "" "$out"
   t_eq "$(printf 'V\t1\nD\tdefaults')" "$(cat "$(aionas_savings_dir)/sessions/sess-1.cache")" "the starting session keeps what it started with"
-  t_eq on "$(aionas_policy_state noisy_guard sess-1)"
-  t_eq off "$(aionas_policy_state noisy_guard)" "the next session gets the new policy"
+  t_eq on "$(aionas_policy_state unused_services sess-1)"
+  t_eq off "$(aionas_policy_state unused_services)" "the next session gets the new policy"
   hook policy-sync.sh '{"session_id":"sess-2"}' >/dev/null
-  t_eq off "$(aionas_policy_state noisy_guard sess-2)"
-  t_eq on "$(aionas_policy_state noisy_guard sess-1)" "a running session did not change"
+  t_eq off "$(aionas_policy_state unused_services sess-2)"
+  t_eq on "$(aionas_policy_state unused_services sess-1)" "a running session did not change"
   t_eq GET "$(t_call 1 method)"
   t_eq https://gw.example.test/enroll/v1/savings/policy "$(t_call 1 url)"
 }
@@ -33,7 +33,7 @@ test_policy_sync_unreachable_keeps_cache_makes_one_call_and_exits_0() {
   t_rc 0 hook policy-sync.sh '{"session_id":"sess-3"}'
   t_eq $((n + 1)) "$(t_calls)" "only the policy fetch was tried"
   t_eq "$before" "$(cat "$(aionas_savings_dir)/policy.cache")"
-  t_eq off "$(aionas_policy_state noisy_guard sess-3)"
+  t_eq off "$(aionas_policy_state output_trim sess-3)"
 }
 
 test_policy_sync_sends_counters_and_pending_overrides_when_reachable() {
@@ -58,10 +58,10 @@ test_policy_sync_not_enrolled_makes_no_call() {
 test_counters_flush_is_hourly() {
   t_enroll; export FAKE_CURL_STATUS=200 AIONAS_NOW=$T0
   mkdir -p "$(aionas_savings_dir)/counters"
-  printf '2026-10-20\tnoisy_guard\tfired\t2\n' >"$(aionas_savings_dir)/counters/queue.tsv"
+  printf '2026-10-20\toutput_trim\tfired\t2\n' >"$(aionas_savings_dir)/counters/queue.tsv"
   t_eq "" "$(hook counters-flush.sh '{}')"
   t_eq 1 "$(t_calls)"
-  printf '2026-10-20\tnoisy_guard\tfired\t1\n' >>"$(aionas_savings_dir)/counters/queue.tsv"
+  printf '2026-10-20\toutput_trim\tfired\t1\n' >>"$(aionas_savings_dir)/counters/queue.tsv"
   export AIONAS_NOW=$((T0 + 600))
   hook counters-flush.sh '{}'
   t_eq 1 "$(t_calls)" "sent twice within the hour"

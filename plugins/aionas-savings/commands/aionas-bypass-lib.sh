@@ -19,8 +19,7 @@ AIONAS_PENDING_MAX=20
 aionas_cmd_method() {
   _cm=$(printf '%s' "$1" | tr 'A-Z-' 'a-z_')
   case "$_cm" in
-    long_output_store | output) _cm=output_store ;;
-    noisy | guard | noisy_command_guard) _cm=noisy_guard ;;
+    trim | output | long_output_store | noisy | guard | noisy_command_guard | noisy_guard | output_store) _cm=output_trim ;;
     effort) _cm=effort_default ;;
     subagent | subagents | subagent_model) _cm=subagent_sonnet ;;
     unused | unused_mcp) _cm=unused_services ;;
@@ -196,7 +195,7 @@ aionas_effort_request_level() {
 
 # The client methods in the band's chip order (cache_alert, seat_fit and the
 # required cache_guard never get a chip).
-AIONAS_BAND_METHODS="effort_default subagent_sonnet noisy_guard output_store handoff unused_services write_minimum"
+AIONAS_BAND_METHODS="effort_default subagent_sonnet output_trim handoff unused_services write_minimum"
 AIONAS_BAND_NAME_MAX=80
 AIONAS_POLICY_SYNC_INTERVAL=${AIONAS_POLICY_SYNC_INTERVAL:-3600}
 
@@ -317,7 +316,7 @@ aionas_band_methods() {
     [ -f "$_bm_f" ] && set -- "$@" "$_bm_f"
   done
   awk -F '\t' -v now="$(aionas_now)" -v today="$(aionas_day_utc)" -v methods="$AIONAS_BAND_METHODS" \
-    -v pin="$_bm_pin" -v cache="$_bm_dir/policy.cache" -v local="$_bm_dir/local-overrides.tsv" \
+    -v defoff="$AIONAS_DEFAULT_OFF_METHODS" -v pin="$_bm_pin" -v cache="$_bm_dir/policy.cache" -v local="$_bm_dir/local-overrides.tsv" \
     -v req="$_bm_dir/requests.tsv" -v win="$_bm_dir/effort-window" -v grant="$_bm_grant" '
     function rows(f, kind,   l, a) {
       if (f == "") return
@@ -353,10 +352,11 @@ aionas_band_methods() {
     NF == 4 && $1 == today && $3 == "fired" && $4 ~ /^[0-9]+$/ { fired[$2] += $4 }
     END {
       n = split(methods, ml, " ")
+      nd = split(defoff, dl, " "); for (k = 1; k <= nd; k++) off0[dl[k]] = 1
       for (k = 1; k <= n; k++) {
         m = ml[k]
-        s = "on"; o = 1; r = 0
-        if (m in row) { r = (rl[m] == 1); o = (so[m] == 1); if (st[m] == "off" || r) s = "off" }
+        s = (m in off0) ? "off" : "on"; o = 1; r = 0
+        if (m in row) { r = (rl[m] == 1); o = (so[m] == 1); s = (st[m] == "off" || r) ? "off" : "on" }
         a = (s == "on" && !(m in byp))
         u = ((m in byp) && !(m in open)) ? until[m] : 0
         printf "method\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\n", m, s, a, o, r, u, (m in pend) ? 1 : 0, fired[m] + 0

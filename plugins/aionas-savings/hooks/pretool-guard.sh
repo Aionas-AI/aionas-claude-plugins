@@ -9,9 +9,12 @@
 # which rule fired (a cap says it in its "[aionas-guard: capped <rule>" line). A failing run keeps its full output: Claude Code reports a
 # failed Bash call through PostToolUseFailure, which nothing here touches.
 #
+# Part of the output_trim method (AIO-883) with posttool-store.sh: off unless
+# the organization turns it on.
+#
 # Bypass: a command that starts with AIONAS_FULL=1 runs unchanged and one
 # "bypass" counter is queued. When the organization blocked self-override of
-# noisy_guard, the guard still applies and tells the model to ask with
+# output_trim, the guard still applies and tells the model to ask with
 # /aionas-bypass (which becomes a request for approval).
 #
 # Prints nothing and exits 0 whenever it has nothing to change. Only counters
@@ -30,7 +33,7 @@ sid=$(aionas_json_get session_id <"$tmp/flat")
 IFS=$'\037' read -r status rule kind newcmd _gid _prog _full < <(aionas_gs_match "$tmp/cmd")
 case "$status" in match | bypass) ;; *) exit 0 ;; esac
 
-aionas_policy_active noisy_guard "$sid" || exit 0
+aionas_policy_active output_trim "$sid" || exit 0
 # A cap rule never rewrites the command: posttool-store.sh cuts a successful
 # run's output and counts it (an AIONAS_GUARD= prefix would stop the person's
 # allow rules such as Bash(cat:*) from matching).
@@ -38,11 +41,11 @@ aionas_policy_active noisy_guard "$sid" || exit 0
 
 note=""
 if [ "$status" = bypass ]; then
-  if aionas_policy_self_override_allowed noisy_guard "$sid"; then
-    aionas_counter_inc noisy_guard bypass
+  if aionas_policy_self_override_allowed output_trim "$sid"; then
+    aionas_counter_inc output_trim bypass
     exit 0
   fi
-  note="AIONAS_FULL=1 is not available for noisy_guard: the organization blocked self-override. To ask for it, run /aionas-bypass noisy_guard [reason]; the request goes for approval."
+  note="AIONAS_FULL=1 is not available for output_trim: the organization blocked self-override. To ask for it, run /aionas-bypass output_trim [reason]; the request goes for approval."
 fi
 
 printf '%s\n' "$newcmd" >"$tmp/new"
@@ -65,5 +68,5 @@ input=$(LC_ALL=C awk -F '\t' '
 ctx=""
 [ -n "$note" ] && ctx=",\"additionalContext\":$(aionas_json_escape "$note")"
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":%s%s}}\n' "$input" "$ctx"
-aionas_counter_inc noisy_guard fired
+aionas_counter_inc output_trim fired
 exit 0

@@ -8,7 +8,13 @@ GUARD="$T_PLUGIN/hooks/pretool-guard.sh"
 RECALL="$T_PLUGIN/bin/aionas-recall"
 unset AI_AGENT AIONAS_CC_VERSION AIONAS_FULL
 
-setup() { export AIONAS_CC_VERSION=2.1.299; }
+# trim_on: a cached policy with output_trim on (it is off with nothing
+# cached, AIO-883); a test that syncs its own policy replaces it.
+trim_on() {
+  aionas_mkdir "$(aionas_savings_dir)" &&
+    printf 'V\t1\nM\toutput_trim\ton\t0\t1\t1\t0\n' >"$(aionas_savings_dir)/policy.cache"
+}
+setup() { export AIONAS_CC_VERSION=2.1.299; trim_on; }
 
 # gen N [WIDTH]: N numbered lines of about WIDTH bytes, no final newline.
 gen() {
@@ -54,8 +60,8 @@ test_view_is_head_40_tail_40_and_the_fixed_marker_byte_for_byte() {
   # F is the whole output (not the view): 300 lines of 90 bytes plus 299 newlines = 27299 bytes.
   t_eq 6824 "$(ftok "$HOME/o.txt")"
   case "$id" in out_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) t_fail "bad id $id" ;; esac
-  t_eq "output_store fired 1
-output_store fired 1" "$(queue)"
+  t_eq "output_trim fired 1
+output_trim fired 1" "$(queue)"
 }
 
 test_answer_is_the_exact_bash_shape() {
@@ -153,15 +159,30 @@ test_guard_caps_sed_grep_cat_at_1500_tokens() {
     t_eq "[aionas-guard: capped $rule at about 1500 tokens: kept $kept of 100 lines (about $(ftok "$HOME/o.txt") tokens), id=$id. More: aionas-recall $id [--grep PATTERN]. Full: rerun with AIONAS_FULL=1]" "$(tail -n 1 <<<"$v")"
   done
   t_ok same_bytes "$HOME/o.txt" "$(aionas_savings_dir)/store/$id.txt"
-  t_eq "noisy_guard fired 8" "$(queue | sort | uniq -c | awk '{ print $2, $3, $1 }')"
+  t_eq "output_trim fired 8" "$(queue | sort | uniq -c | awk '{ print $2, $3, $1 }')"
   # Under the cap: untouched.
   gen 60 >"$HOME/s.txt"
   t_eq "" "$(post 'cat s' "$HOME/s.txt")"
-  # sed -i is not a cap rule, and with noisy_guard off a cat is not capped:
-  # both fall to the store (2,000 tokens).
+  # sed -i is not a cap rule: it falls to the store (2,000 tokens).
   t_contains "$(view "$(post 'sed -i s/a/b/ f' "$HOME/o.txt")" | tail -n 1)" "[aionas-store: kept 40+40 of 100 lines (about "
-  policy '{"methods":[{"method_id":"noisy_guard","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
-  t_contains "$(view "$(post 'cat big.log' "$HOME/o.txt")" | tail -n 1)" "[aionas-store: kept 40+40 of 100 lines (about "
+  # With output_trim off (AIO-883) neither the cap nor the store acts.
+  policy '{"methods":[{"method_id":"output_trim","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
+  t_eq "" "$(post 'cat big.log' "$HOME/o.txt")"
+  t_eq "" "$(post 'sed -i s/a/b/ f' "$HOME/o.txt")"
+}
+
+# AIO-883: with no policy cached, output_trim is off: no cap, no store, and
+# an old gateway's answer that has only noisy_guard / output_store on changes
+# nothing either.
+test_output_trim_is_off_by_default() {
+  export AIONAS_CC_VERSION=2.1.299
+  gen 300 >"$HOME/o.txt"
+  t_eq "" "$(post './build.sh' "$HOME/o.txt")"
+  t_eq "" "$(post 'cat big.log' "$HOME/o.txt")"
+  policy '{"methods":[{"method_id":"noisy_guard","state":"on","required":false,"self_override_allowed":true,"self_release_allowed":true},{"method_id":"output_store","state":"on","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
+  t_eq off "$(aionas_policy_state output_trim)"
+  t_eq "" "$(post './build.sh' "$HOME/o.txt")"
+  t_eq "" "$(queue)" "nothing counted"
 }
 
 test_cap_marker_names_the_rule() {
@@ -174,44 +195,45 @@ test_bypass_passes_output_unchanged_and_counts_once() {
   setup
   gen 300 >"$HOME/o.txt"
   t_eq "" "$(post 'AIONAS_FULL=1 ./build.sh' "$HOME/o.txt")"
-  t_eq "output_store bypass 1" "$(queue)"
+  t_eq "output_trim bypass 1" "$(queue)"
   # A guard command: the guard counts it, the store does not count it again.
   : >"$(aionas_savings_dir)/counters/queue.tsv"
   t_eq "" "$(printf '{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"AIONAS_FULL=1 git log"}}' | bash "$GUARD")"
   t_eq "" "$(post 'AIONAS_FULL=1 git log' "$HOME/o.txt")"
-  t_eq "noisy_guard bypass 1" "$(queue)"
+  t_eq "output_trim bypass 1" "$(queue)"
   # A cap rule: only the post-tool hook counts it.
   : >"$(aionas_savings_dir)/counters/queue.tsv"
   t_eq "" "$(printf '{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"AIONAS_FULL=1 cat big.log"}}' | bash "$GUARD")"
   t_eq "" "$(post 'AIONAS_FULL=1 cat big.log' "$HOME/o.txt")"
-  t_eq "noisy_guard bypass 1" "$(queue)"
+  t_eq "output_trim bypass 1" "$(queue)"
   t_eq "" "$(ls "$(aionas_savings_dir)/store" 2>/dev/null)" "a bypass stored the output"
 }
 
 test_blocked_self_override_still_stores_and_points_to_a_request() {
   setup
-  policy '{"methods":[{"method_id":"output_store","state":"on","required":false,"self_override_allowed":false,"self_release_allowed":true}],"overrides":[]}'
+  policy '{"methods":[{"method_id":"output_trim","state":"on","required":false,"self_override_allowed":false,"self_release_allowed":true}],"overrides":[]}'
   gen 300 >"$HOME/o.txt"
   local out
   out=$(post 'AIONAS_FULL=1 ./build.sh' "$HOME/o.txt")
   t_contains "$(view "$out")" "[aionas-store: kept 40+40 of 300 lines"
-  t_contains "$(aionas_json_flatten <<<"$out" | aionas_json_get hookSpecificOutput.additionalContext)" "/aionas-bypass output_store"
-  t_eq "output_store fired 1" "$(queue)"
+  t_contains "$(aionas_json_flatten <<<"$out" | aionas_json_get hookSpecificOutput.additionalContext)" "/aionas-bypass output_trim"
+  t_eq "output_trim fired 1" "$(queue)"
 }
 
 test_method_off_leaves_output_untouched() {
   setup
-  policy '{"methods":[{"method_id":"output_store","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
+  policy '{"methods":[{"method_id":"output_trim","state":"off","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}'
   gen 300 >"$HOME/o.txt"
   t_eq "" "$(post './build.sh' "$HOME/o.txt")"
   t_eq "" "$(queue)"
 }
 
 test_below_the_probed_minimum_outputs_are_untouched_and_store_inactive() {
+  trim_on
   gen 300 >"$HOME/o.txt"
   export AIONAS_CC_VERSION=2.1.298
   t_eq "" "$(post './build.sh' "$HOME/o.txt")"
-  t_eq "output_store skipped 1" "$(queue)"
+  t_eq "output_trim skipped 1" "$(queue)"
   t_contains "$(bash "$RECALL" --status)" "store inactive"
   t_eq "" "$(ls "$(aionas_savings_dir)/store" 2>/dev/null)"
   # Unknown version (no env, no transcript): inactive too.
@@ -273,8 +295,9 @@ test_only_counts_reach_the_server() {
   local body all n
   body=$(t_call 1 body)
   t_eq "https://gw.example.test/enroll/v1/savings/counters" "$(t_call 1 url)"
-  rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"(noisy_guard|output_store)","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.1.4","counters":[,,,]}' "$rest"
+  rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"output_trim","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
+  # One method now (AIO-883): fired, bypass and skipped.
+  t_eq '{"plugin_version":"0.2.0","counters":[,,]}' "$rest"
   all=$(cat "$FAKE_CURL_LOG"/*/* 2>/dev/null)
   for n in SECRET hunter2 deploy secrets.env build line; do t_lacks "$all" "$n" "content sent"; done
 }

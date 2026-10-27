@@ -38,7 +38,7 @@ set -u
 . "$(dirname "$0")/aionas-bypass-lib.sh" || exit 1
 
 SID=${AIONAS_SESSION_ID:-}
-CLIENT_METHODS="handoff effort_default subagent_sonnet unused_services noisy_guard output_store write_minimum"
+CLIENT_METHODS="handoff effort_default subagent_sonnet unused_services output_trim write_minimum"
 
 usage() {
   echo "Usage: /aionas-bypass <method> [duration] [reason]. Methods: $CLIENT_METHODS. Duration: 30m, 1h, 2d (default 1h)."

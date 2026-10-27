@@ -2,8 +2,8 @@
   "methods": [
     {"method_id": "handoff", "state": "on", "required": false, "self_override_allowed": true, "self_release_allowed": true, "source_scope": "default", "released": false,
      "params": {"threshold_tokens": 200000, "idle_minutes": 55, "nested": {"x": "y"}}},
-    {"method_id": "noisy_guard", "state": "off", "required": false, "self_override_allowed": false, "self_release_allowed": false, "source_scope": "org", "released": false, "params": null},
-    {"method_id": "output_store", "state": "on", "required": false, "self_override_allowed": true, "self_release_allowed": true, "source_scope": "person", "released": true},
+    {"method_id": "output_trim", "state": "off", "required": false, "self_override_allowed": false, "self_release_allowed": false, "source_scope": "org", "released": false, "params": null},
+    {"method_id": "unused_services", "state": "on", "required": false, "self_override_allowed": true, "self_release_allowed": true, "source_scope": "person", "released": true},
     {"method_id": "effort_default", "state": "on", "required": false, "self_override_allowed": false, "self_release_allowed": true, "source_scope": "team"},
     {"method_id": "cache_guard", "state": "off", "required": true, "self_override_allowed": true, "self_release_allowed": true},
     {"method_id": "not_a_method", "state": "off", "required": false, "self_override_allowed": false, "self_release_allowed": false},

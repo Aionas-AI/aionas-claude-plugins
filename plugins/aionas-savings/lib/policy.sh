@@ -8,8 +8,8 @@
 #   sync.status           "<epoch> <http status>" of the last sync attempt
 #
 # A session reads its pin, so a policy change applies from the next session
-# only. With nothing cached every method is on and self-override and
-# self-release are allowed (W24-1, W24-2). Required methods are always on and
+# only. With nothing cached every method is on (output_trim off, AIO-883) and
+# self-override and self-release are allowed (W24-1, W24-2). Required methods are always on and
 # can never be overridden or released.
 
 # aionas_policy_sync: fetch the person's policy in one try (3 s connect, 5 s
@@ -64,7 +64,10 @@ aionas_policy_state() {
   aionas_is_method "$1" || return 2
   if aionas_is_required "$1"; then echo on; return 0; fi
   _st_row=$(_aionas_policy_row "$1" "${2:-}")
-  if [ -z "$_st_row" ]; then echo on; return 0; fi
+  if [ -z "$_st_row" ]; then
+    if aionas_is_default_off "$1"; then echo off; else echo on; fi
+    return 0
+  fi
   set -- $_st_row
   # M method state required self_override self_release released
   if [ "$3" = off ] || [ "$7" = 1 ]; then echo off; else echo on; fi

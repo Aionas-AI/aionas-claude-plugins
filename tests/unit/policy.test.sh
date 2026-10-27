@@ -24,7 +24,7 @@ test_sync_writes_cache_rows() {
   sync_ok
   local c; c=$(cat "$(aionas_savings_dir)/policy.cache")
   t_contains "$c" "$(printf 'M\thandoff\ton\t0\t1\t1\t0')"
-  t_contains "$c" "$(printf 'M\tnoisy_guard\toff\t0\t0\t0\t0')"
+  t_contains "$c" "$(printf 'M\toutput_trim\toff\t0\t0\t0\t0')"
   t_contains "$c" "$(printf 'P\thandoff\tthreshold_tokens\tn\t200000')"
   t_contains "$c" "$(printf 'P\thandoff\tnested.x\ts\ty')"
   t_contains "$c" "$(printf 'O\tsubagent_sonnet\tself\t%s\t%s\tovr_1' $T0 $((T0 + 3600)))"
@@ -38,6 +38,11 @@ test_sync_writes_cache_rows() {
 test_defaults_when_nothing_cached() {
   local m
   for m in $AIONAS_METHODS; do
+    if [ "$m" = output_trim ]; then
+      t_eq off "$(aionas_policy_state "$m")" "$m default (AIO-883)"
+      t_not aionas_policy_active "$m"
+      continue
+    fi
     t_eq on "$(aionas_policy_state "$m")" "$m default"
     t_ok aionas_policy_active "$m"
   done
@@ -45,17 +50,17 @@ test_defaults_when_nothing_cached() {
   t_ok aionas_policy_self_release_allowed handoff
   t_not aionas_policy_self_override_allowed cache_guard
   t_not aionas_policy_self_release_allowed cache_guard
-  t_rc 2 aionas_policy_state long_output_store
+  t_rc 2 aionas_policy_state long_output_trim
 }
 
 test_lookups_follow_cache() {
   sync_ok
   t_eq on "$(aionas_policy_state handoff)"
-  t_eq off "$(aionas_policy_state noisy_guard)"
-  t_eq off "$(aionas_policy_state output_store)" "released means off"
+  t_eq off "$(aionas_policy_state output_trim)"
+  t_eq off "$(aionas_policy_state unused_services)" "released means off"
   t_eq on "$(aionas_policy_state cache_guard)" "required stays on"
   t_eq on "$(aionas_policy_state dispatcher)" "absent method is on"
-  t_not aionas_policy_self_override_allowed noisy_guard
+  t_not aionas_policy_self_override_allowed output_trim
   t_not aionas_policy_self_override_allowed effort_default
   t_ok aionas_policy_self_release_allowed effort_default
   t_eq 55 "$(aionas_policy_param handoff idle_minutes)"
@@ -74,15 +79,16 @@ test_failed_sync_keeps_last_good_cache() {
   printf '{"overrides":[]}' >"$junk"
   FAKE_CURL_BODY=$junk t_rc 1 aionas_policy_sync
   t_eq "$before" "$(cat "$(aionas_savings_dir)/policy.cache")" "after bad answers"
-  t_eq off "$(aionas_policy_state noisy_guard)"
+  t_eq off "$(aionas_policy_state output_trim)"
   t_eq 000 "$( (FAKE_CURL_EXIT=28 aionas_policy_sync); cut -d' ' -f2 "$(aionas_savings_dir)/sync.status")"
 }
 
-test_failed_sync_without_cache_means_all_on() {
+test_failed_sync_without_cache_means_the_defaults() {
   t_enroll
   FAKE_CURL_EXIT=7 t_rc 1 aionas_policy_sync
   t_ok test ! -e "$(aionas_savings_dir)/policy.cache"
-  t_eq on "$(aionas_policy_state noisy_guard)"
+  t_eq on "$(aionas_policy_state handoff)"
+  t_eq off "$(aionas_policy_state output_trim)" "off by default (AIO-883)"
 }
 
 test_not_enrolled_makes_no_call() {
@@ -103,20 +109,21 @@ test_session_pin_holds_until_next_session() {
   local on; on=$(mktemp "$T_ROOT/p.XXXXXX")
   sed 's/"state": "off", "required": false, "self_override_allowed": false/"state": "on", "required": false, "self_override_allowed": true/' "$FIX/policy.json" >"$on"
   FAKE_CURL_BODY=$on t_rc 0 aionas_policy_sync
-  t_eq off "$(aionas_policy_state noisy_guard sess-A)" "running session changed"
+  t_eq off "$(aionas_policy_state output_trim sess-A)" "running session changed"
   t_ok aionas_policy_pin sess-A
-  t_eq off "$(aionas_policy_state noisy_guard sess-A)" "re-pin replaced the pin"
+  t_eq off "$(aionas_policy_state output_trim sess-A)" "re-pin replaced the pin"
   t_ok aionas_policy_pin sess-B
-  t_eq on "$(aionas_policy_state noisy_guard sess-B)" "new session missed the change"
-  t_eq on "$(aionas_policy_state noisy_guard)"
+  t_eq on "$(aionas_policy_state output_trim sess-B)" "new session missed the change"
+  t_eq on "$(aionas_policy_state output_trim)"
   t_rc 2 aionas_policy_pin '../x'
 }
 
 test_pin_without_cache_stays_on_defaults() {
   t_ok aionas_policy_pin s1
   sync_ok
-  t_eq on "$(aionas_policy_state noisy_guard s1)"
-  t_eq off "$(aionas_policy_state noisy_guard)"
+  t_eq on "$(aionas_policy_state unused_services s1)"
+  t_eq off "$(aionas_policy_state unused_services)"
+  t_eq off "$(aionas_policy_state output_trim s1)" "output_trim's default is off"
 }
 
 test_pins_are_capped() {
@@ -147,7 +154,7 @@ test_local_override_applies_at_once_and_expires() {
   t_rc 2 aionas_override_local_add handoff 0
   t_rc 2 aionas_override_local_add handoff 99999999
   t_rc 2 aionas_override_local_add handoff 60 requested
-  AIONAS_NOW=$((T0 + 7200)) aionas_override_local_add noisy_guard 60
+  AIONAS_NOW=$((T0 + 7200)) aionas_override_local_add output_trim 60
   t_eq 1 "$(wc -l <"$(aionas_savings_dir)/local-overrides.tsv" | tr -d ' ')" "expired row kept"
 }
 

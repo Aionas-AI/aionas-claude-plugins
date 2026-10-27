@@ -27,14 +27,14 @@ while time.time() < end:
   port=$(cat "$portf")
   t_enroll "http://127.0.0.1:$port"
   aionas_mkdir "$(aionas_savings_dir)"
-  printf 'V\t1\nM\tnoisy_guard\toff\t0\t0\t0\t0\n' >"$(aionas_savings_dir)/policy.cache"
+  printf 'V\t1\nM\toutput_trim\toff\t0\t0\t0\t0\n' >"$(aionas_savings_dir)/policy.cache"
   t1=$(date +%s)
   t_rc 1 aionas_policy_sync
   t2=$(date +%s)
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
   [ $((t2 - t1)) -le 6 ] || t_fail "sync took $((t2 - t1)) s"
   [ $((t2 - t1)) -ge 4 ] || t_fail "sync returned in $((t2 - t1)) s: the hang was not exercised"
-  t_eq off "$(aionas_policy_state noisy_guard)"
+  t_eq off "$(aionas_policy_state output_trim)"
   t_eq 000 "$(cut -d' ' -f2 "$(aionas_savings_dir)/sync.status")"
 }
 

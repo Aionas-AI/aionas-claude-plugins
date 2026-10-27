@@ -25,7 +25,7 @@ bad() { printf 'FAIL %s\n' "$*"; fail=1; }
 port=$((21000 + RANDOM % 20000))
 LOG="$ROOT/stub.log"; : >"$LOG"
 POLICY="$ROOT/policy.json"
-printf '{"methods":[{"method_id":"noisy_guard","state":"on","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}\n' >"$POLICY"
+printf '{"methods":[{"method_id":"output_trim","state":"on","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[]}\n' >"$POLICY"
 python3 -I "$REPO/tests/e2e/stub.py" "$port" "$LOG" "$POLICY" &
 stub=$!
 trap 'kill $stub $hole 2>/dev/null' EXIT
@@ -60,13 +60,13 @@ since() { sed -n "$(($1 + 1)),\$p" "$LOG"; }
 
 # 1. /aionas-bypass with a reason, then without, then blocked.
 m=$(mark)
-out=$(cc "/aionas-bypass noisy_guard 1h debugging a flaky test")
-case "$out" in *"noisy_guard is off for you for 1 hour"*) pass "bypass prints its line" ;; *) bad "bypass output: $out $(head -c 300 "$ROOT/err")" ;; esac
+out=$(cc "/aionas-bypass output_trim 1h debugging a flaky test")
+case "$out" in *"output_trim is off for you for 1 hour"*) pass "bypass prints its line" ;; *) bad "bypass output: $out $(head -c 300 "$ROOT/err")" ;; esac
 since "$m" | grep -q '"path": "/enroll/v1/savings/overrides".*"reason": "debugging a flaky test"' && pass "override stored with its reason" || bad "no override with reason in $(since "$m")"
 since "$m" | grep -q '"path": "/v1/messages' && bad "a model request was made for a slash command" || pass "no model turn for /aionas-bypass"
 m=$(mark)
-cc "/aionas-bypass long_output_store 1h" >/dev/null
-since "$m" | grep '"/enroll/v1/savings/overrides' | grep -q '"method_id": "output_store", "duration_seconds": 3600}' && pass "second override has no reason" || bad "second override: $(since "$m")"
+cc "/aionas-bypass long_output_trim 1h" >/dev/null
+since "$m" | grep '"/enroll/v1/savings/overrides' | grep -q '"method_id": "output_trim", "duration_seconds": 3600}' && pass "second override has no reason" || bad "second override: $(since "$m")"
 printf '{"methods":[{"method_id":"handoff","state":"on","required":false,"self_override_allowed":false,"self_release_allowed":true}],"overrides":[],"x_blocked":["handoff"]}\n' >"$POLICY"
 out=$(cc "/aionas-bypass handoff 2h")
 case "$out" in *"sent for approval"*) pass "blocked override is sent for approval" ;; *) bad "blocked: $out" ;; esac

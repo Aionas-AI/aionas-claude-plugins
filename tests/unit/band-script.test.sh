@@ -29,8 +29,9 @@ test_band_with_nothing_cached_is_the_local_half_all_on_and_offline() {
   t_eq "$(printf 'clock\t%s\t0' "$T0")" "$(line "$out" clock)"
   t_lacks "$out" "me$TAB"
   t_lacks "$out" "savings$TAB"
-  t_eq 7 "$(printf '%s\n' "$out" | grep -c "^method$TAB")"
-  t_eq "$(printf 'method\tnoisy_guard\ton\t1\t1\t0\t0\t0\t0')" "$(line "$out" "method${TAB}noisy_guard")"
+  t_eq 6 "$(printf '%s\n' "$out" | grep -c "^method$TAB")"
+  t_eq "$(printf 'method\thandoff\ton\t1\t1\t0\t0\t0\t0')" "$(line "$out" "method${TAB}handoff")"
+  t_eq "$(printf 'method\toutput_trim\toff\t0\t1\t0\t0\t0\t0')" "$(line "$out" "method${TAB}output_trim")" "off by default (AIO-883)"
   t_lacks "$out" cache_guard
   t_lacks "$out" cache_alert
   t_lacks "$out" seat_fit
@@ -41,7 +42,7 @@ test_band_with_nothing_cached_is_the_local_half_all_on_and_offline() {
 }
 
 test_band_order_is_the_chip_order() {
-  t_eq "effort_default subagent_sonnet noisy_guard output_store handoff unused_services write_minimum" \
+  t_eq "effort_default subagent_sonnet output_trim handoff unused_services write_minimum" \
     "$(band | awk -F '\t' '$1 == "method" { printf "%s%s", (n++ ? " " : ""), $2 }')"
 }
 
@@ -84,16 +85,16 @@ test_band_subscription_savings_and_malformed_blocks() {
 
 test_band_method_states_from_the_pin_local_overrides_requests_and_counters() {
   export AIONAS_NOW=$T0
-  cache "V\t1\nF\t$((T0 - 60))\nM\tnoisy_guard\ton\t0\t0\t1\t0\nM\twrite_minimum\ton\t0\t1\t1\t1\nM\thandoff\toff\t0\t1\t1\t0\nP\thandoff\tthreshold_tokens\tn\t150000\nP\thandoff\tidle_minutes\tn\t40\nO\toutput_store\tself\t$((T0 - 600))\t$((T0 + 3000))\tovr_1\nO\tunused_services\trequested\t0\t0\tovr_2\n"
+  cache "V\t1\nF\t$((T0 - 60))\nM\toutput_trim\ton\t0\t0\t1\t0\nM\twrite_minimum\ton\t0\t1\t1\t1\nM\thandoff\toff\t0\t1\t1\t0\nP\thandoff\tthreshold_tokens\tn\t150000\nP\thandoff\tidle_minutes\tn\t40\nO\teffort_default\tself\t$((T0 - 600))\t$((T0 + 3000))\tovr_1\nO\tunused_services\trequested\t0\t0\tovr_2\n"
   aionas_override_local_add subagent_sonnet 1800 self
   mkdir -p "$(aionas_savings_dir)/counters"
-  printf '2026-10-20\tnoisy_guard\tfired\t3\n2026-10-20\tnoisy_guard\tfired\t1\n2026-10-20\tnoisy_guard\tbypass\t1\n2026-10-19\tnoisy_guard\tfired\t9\n' >"$(aionas_savings_dir)/counters/queue.tsv"
-  printf '2026-10-20\toutput_store\tfired\t2\n' >"$(aionas_savings_dir)/counters/pending.tsv"
+  printf '2026-10-20\toutput_trim\tfired\t3\n2026-10-20\toutput_trim\tfired\t1\n2026-10-20\toutput_trim\tbypass\t1\n2026-10-19\toutput_trim\tfired\t9\n' >"$(aionas_savings_dir)/counters/queue.tsv"
+  printf '2026-10-20\teffort_default\tfired\t2\n' >"$(aionas_savings_dir)/counters/pending.tsv"
   local out; out=$(band)
-  t_eq "$(printf 'method\tnoisy_guard\ton\t1\t0\t0\t0\t0\t4')" "$(line "$out" "method${TAB}noisy_guard")" "blocked self-override, 4 fired today"
+  t_eq "$(printf 'method\toutput_trim\ton\t1\t0\t0\t0\t0\t4')" "$(line "$out" "method${TAB}output_trim")" "blocked self-override, 4 fired today"
   t_eq "$(printf 'method\twrite_minimum\toff\t0\t1\t1\t0\t0\t0')" "$(line "$out" "method${TAB}write_minimum")" "released"
   t_eq "$(printf 'method\thandoff\toff\t0\t1\t0\t0\t0\t0')" "$(line "$out" "method${TAB}handoff")" "off by policy"
-  t_eq "$(printf 'method\toutput_store\ton\t0\t1\t0\t%s\t0\t2' $((T0 + 3000)))" "$(line "$out" "method${TAB}output_store")" "server bypass in force"
+  t_eq "$(printf 'method\teffort_default\ton\t0\t1\t0\t%s\t0\t2' $((T0 + 3000)))" "$(line "$out" "method${TAB}effort_default")" "server bypass in force"
   t_eq "$(printf 'method\tsubagent_sonnet\ton\t0\t1\t0\t%s\t0\t0' $((T0 + 1800)))" "$(line "$out" "method${TAB}subagent_sonnet")" "local bypass"
   t_eq "$(printf 'method\tunused_services\ton\t1\t1\t0\t0\t1\t0')" "$(line "$out" "method${TAB}unused_services")" "request pending"
   t_eq "$(printf 'compact_at\t150000\t40')" "$(line "$out" compact_at)"
@@ -135,64 +136,65 @@ test_band_gateway_host_and_local_offset() {
 
 test_blocked_bypass_is_recorded_as_a_pending_request_until_the_next_sync() {
   t_enroll; export AIONAS_NOW=$T0
-  cache "V\t1\nF\t$((T0 - 60))\nM\tnoisy_guard\ton\t0\t0\t1\t0\n"
+  cache "V\t1\nF\t$((T0 - 60))\nM\toutput_trim\ton\t0\t0\t1\t0\n"
   answer 202 requested ovr_c
-  local out; out=$(AIONAS_SESSION_ID=s1 bash "$BYPASS" noisy_guard 1h)
+  local out; out=$(AIONAS_SESSION_ID=s1 bash "$BYPASS" output_trim 1h)
   t_contains "$out" "sent for approval"
-  t_eq "$(printf 'method\tnoisy_guard\ton\t1\t0\t0\t0\t1\t0')" "$(method_line noisy_guard)"
+  t_eq "$(printf 'method\toutput_trim\ton\t1\t0\t0\t0\t1\t0')" "$(method_line output_trim)"
   # A newer sync that no longer lists the request (approved or declined) wins.
-  cache "V\t1\nF\t$((T0 + 60))\nM\tnoisy_guard\ton\t0\t0\t1\t0\n"
+  cache "V\t1\nF\t$((T0 + 60))\nM\toutput_trim\ton\t0\t0\t1\t0\n"
   export AIONAS_NOW=$((T0 + 120))
-  t_eq "$(printf 'method\tnoisy_guard\ton\t1\t0\t0\t0\t0\t0')" "$(method_line noisy_guard)"
+  t_eq "$(printf 'method\toutput_trim\ton\t1\t0\t0\t0\t0\t0')" "$(method_line output_trim)"
 }
 
 test_blocked_bypass_while_offline_is_pending_too() {
   t_enroll; export AIONAS_NOW=$T0 FAKE_CURL_EXIT=7
-  cache "V\t1\nF\t$((T0 - 60))\nM\toutput_store\ton\t0\t0\t1\t0\n"
-  AIONAS_SESSION_ID=s1 bash "$BYPASS" output_store 1h >/dev/null
-  t_eq 1 "$(method_line output_store | cut -f8)"
+  cache "V\t1\nF\t$((T0 - 60))\nM\toutput_trim\ton\t0\t0\t1\t0\n"
+  AIONAS_SESSION_ID=s1 bash "$BYPASS" output_trim 1h >/dev/null
+  t_eq 1 "$(method_line output_trim | cut -f8)"
 }
 
 test_end_ends_my_local_bypass_at_once_with_no_network_call_and_no_counter() {
   t_enroll; export AIONAS_NOW=$T0; answer 201 self ovr_a
-  AIONAS_SESSION_ID=s1 bash "$BYPASS" noisy_guard 1h >/dev/null
+  cache "V\t1\nF\t$((T0 - 60))\nM\toutput_trim\ton\t0\t1\t1\t0\n" # off by default (AIO-883)
+  AIONAS_SESSION_ID=s1 bash "$BYPASS" output_trim 1h >/dev/null
   t_eq 1 "$(t_calls)"
-  t_not aionas_policy_active noisy_guard s1
+  t_not aionas_policy_active output_trim s1
   local q; q=$(cat "$(aionas_savings_dir)/counters/queue.tsv")
-  local out; out=$(AIONAS_SESSION_ID=s1 bash "$BYPASS" --end noisy_guard)
+  local out; out=$(AIONAS_SESSION_ID=s1 bash "$BYPASS" --end output_trim)
   t_eq 0 $?
-  t_contains "$out" "noisy_guard is back on for you on this computer"
+  t_contains "$out" "output_trim is back on for you on this computer"
   t_eq 1 "$(t_calls)" "--end makes no network call"
-  t_ok aionas_policy_active noisy_guard s1
+  t_ok aionas_policy_active output_trim s1
   t_eq "$q" "$(cat "$(aionas_savings_dir)/counters/queue.tsv")" "the bypass counter is unchanged"
-  t_eq "$(printf 'method\tnoisy_guard\ton\t1\t1\t0\t0\t0\t0')" "$(method_line noisy_guard)"
+  t_eq "$(printf 'method\toutput_trim\ton\t1\t1\t0\t0\t0\t0')" "$(method_line output_trim)"
 }
 
 test_end_also_ends_the_server_row_in_the_pins_and_after_a_later_sync() {
   export AIONAS_NOW=$T0
-  local o; o="O\tnoisy_guard\tself\t$((T0 - 600))\t$((T0 + 3000))\tovr_1\n"
-  cache "V\t1\nF\t$((T0 - 60))\nM\tnoisy_guard\ton\t0\t1\t1\t0\n$o"
+  local o; o="O\toutput_trim\tself\t$((T0 - 600))\t$((T0 + 3000))\tovr_1\n"
+  cache "V\t1\nF\t$((T0 - 60))\nM\toutput_trim\ton\t0\t1\t1\t0\n$o"
   cp "$(aionas_savings_dir)/sessions/s1.cache" "$(aionas_savings_dir)/sessions/s2.cache"
-  t_not aionas_policy_active noisy_guard s2
+  t_not aionas_policy_active output_trim s2
   AIONAS_SESSION_ID=s1 bash "$BYPASS" --end guard >/dev/null
-  t_ok aionas_policy_active noisy_guard s1
-  t_ok aionas_policy_active noisy_guard s2
-  t_ok aionas_policy_active noisy_guard
+  t_ok aionas_policy_active output_trim s1
+  t_ok aionas_policy_active output_trim s2
+  t_ok aionas_policy_active output_trim
   # The server keeps its row until its own end: a later sync brings it back,
   # and the band's next read (or the hourly flush) strips it again.
   export AIONAS_NOW=$((T0 + 60))
-  cache "V\t1\nF\t$((T0 + 60))\nM\tnoisy_guard\ton\t0\t1\t1\t0\n$o"
-  t_not aionas_policy_active noisy_guard s1
-  t_eq 1 "$(method_line noisy_guard | cut -f4)"
-  t_ok aionas_policy_active noisy_guard s1
-  t_ok aionas_policy_active noisy_guard
+  cache "V\t1\nF\t$((T0 + 60))\nM\toutput_trim\ton\t0\t1\t1\t0\n$o"
+  t_not aionas_policy_active output_trim s1
+  t_eq 1 "$(method_line output_trim | cut -f4)"
+  t_ok aionas_policy_active output_trim s1
+  t_ok aionas_policy_active output_trim
   # A new bypass made after the end is not touched.
-  cache "V\t1\nF\t$((T0 + 60))\nM\tnoisy_guard\ton\t0\t1\t1\t0\nO\tnoisy_guard\tself\t$((T0 + 30))\t$((T0 + 3600))\tovr_2\n"
-  t_eq 0 "$(method_line noisy_guard | cut -f4)"
+  cache "V\t1\nF\t$((T0 + 60))\nM\toutput_trim\ton\t0\t1\t1\t0\nO\toutput_trim\tself\t$((T0 + 30))\t$((T0 + 3600))\tovr_2\n"
+  t_eq 0 "$(method_line output_trim | cut -f4)"
 }
 
 test_end_without_a_bypass_required_and_unknown() {
-  local out; out=$(bash "$BYPASS" --end output_store)
+  local out; out=$(bash "$BYPASS" --end output_trim)
   t_eq 0 $?
   t_contains "$out" "was not bypassed"
   t_rc 1 bash "$BYPASS" --end cache_guard >/dev/null
@@ -225,7 +227,7 @@ test_counters_flush_skips_the_counters_when_the_sync_finds_the_gateway_down() {
   t_enroll; export FAKE_CURL_EXIT=28 AIONAS_NOW=$T0
   aionas_mkdir "$(aionas_savings_dir)/counters"
   printf '%s 200\n' $((T0 - 3700)) >"$(aionas_savings_dir)/sync.status"
-  printf '2026-10-20\tnoisy_guard\tfired\t2\n' >"$(aionas_savings_dir)/counters/queue.tsv"
+  printf '2026-10-20\toutput_trim\tfired\t2\n' >"$(aionas_savings_dir)/counters/queue.tsv"
   printf '{}' | bash "$FLUSH"
   t_eq 1 "$(t_calls)" "one try, then the hook ends within its timeout"
   t_ok test -f "$(aionas_savings_dir)/counters/queue.tsv"
@@ -234,13 +236,13 @@ test_counters_flush_skips_the_counters_when_the_sync_finds_the_gateway_down() {
 test_counters_flush_keeps_an_early_end_after_its_sync() {
   t_enroll; export AIONAS_NOW=$T0
   local f; f=$(mktemp "$T_ROOT/pol.XXXXXX")
-  printf '{"methods":[],"overrides":[{"id":"o1","method_id":"noisy_guard","status":"self","from_at":"2026-10-20T09:50:00Z","until_at":"2026-10-20T10:50:00Z"}]}' >"$f"
+  printf '{"methods":[{"method_id":"output_trim","state":"on","required":false,"self_override_allowed":true,"self_release_allowed":true}],"overrides":[{"id":"o1","method_id":"output_trim","status":"self","from_at":"2026-10-20T09:50:00Z","until_at":"2026-10-20T10:50:00Z"}]}' >"$f"
   export FAKE_CURL_STATUS=200 FAKE_CURL_BODY=$f
-  bash "$BYPASS" --end noisy_guard >/dev/null
+  bash "$BYPASS" --end output_trim >/dev/null
   printf '%s 200\n' $((T0 - 3700)) >"$(aionas_savings_dir)/sync.status"
   printf '{}' | bash "$FLUSH"
   t_eq GET "$(t_call 1 method)"
-  t_ok aionas_policy_active noisy_guard
+  t_ok aionas_policy_active output_trim
 }
 
 t_main "$@"

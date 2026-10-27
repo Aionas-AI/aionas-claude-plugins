@@ -20,6 +20,8 @@
 //   session is left to the settings cap (maxEffortLevel=high); an older
 //   install's pin (CLAUDE_CODE_EFFORT_LEVEL) is moved by /effort for the
 //   session it is typed in.
+// - subagent_sonnet: sub-agents that pick no model run on Sonnet while the
+//   method is on, and on the person's own choice again once it is off.
 // - The handoff row (AIO-874): the minutes left until the handoff doc, with
 //   "Done with this chat" (also /aionas-done: no doc for this session); after
 //   the doc, the minutes left until the session's prompt cache runs out; once
@@ -131,6 +133,20 @@ async function run($: EngineInterface, argv: string[]): Promise<Ran> {
 
 async function bypass($: EngineInterface, args: string[]): Promise<Ran> {
   return run($, [script($.plugin.root, 'commands/aionas-bypass.sh'), ...args])
+}
+
+// subagent_sonnet: Sonnet for sub-agents that pick no model, set in this
+// process just before each sub-agent starts (Claude Code reads the variable
+// then), and taken off again once the method is off, released or bypassed.
+// The person's settings.json is never written. The value the process started
+// with is kept in AIONAS_SUBAGENT_MODEL_BASE ("-" for none), so a reload of
+// this module does not take Aionas's own Sonnet for the person's.
+async function subagentModel($: EngineInterface): Promise<void> {
+  const base = (await $.env.get('AIONAS_SUBAGENT_MODEL_BASE')) ?? '-'
+  const r = await bypass($, ['--subagent-model', base === '-' ? '' : base])
+  if (r.code !== 0 || r.out === '') return
+  const want = r.out === '-' ? undefined : r.out
+  if ((await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) !== want) await $.env.set('CLAUDE_CODE_SUBAGENT_MODEL', want)
 }
 
 // The band's facts, read again (§6): at session start, every 30 s, after a
@@ -309,6 +325,9 @@ export const register: Register = on => {
     st.bash = (await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')) ?? 'bash'
     st.baseExtra = await $.env.get('CLAUDE_CODE_EXTRA_BODY')
     st.baseUrl = await $.env.get('ANTHROPIC_BASE_URL')
+    if ((await $.env.get('AIONAS_SUBAGENT_MODEL_BASE')) === undefined) {
+      await $.env.set('AIONAS_SUBAGENT_MODEL_BASE', (await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) ?? '-')
+    }
     // Not awaited: the session never waits on a process; a request waits only
     // in the rare case it is sent before the grant is read.
     st.sent = undefined
@@ -376,6 +395,11 @@ export const register: Register = on => {
     if (EFFORT_ARGS.includes(level) && (await $.env.get('CLAUDE_CODE_EFFORT_LEVEL')) !== undefined) {
       await $.env.set('CLAUDE_CODE_EFFORT_LEVEL', level === 'auto' ? undefined : level)
     }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('agent.spawn', async ($, e, next) => {
+    await subagentModel($)
     return next(e)
   }).catch(($, e, next) => next(e))
 

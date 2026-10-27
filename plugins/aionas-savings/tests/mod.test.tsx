@@ -110,6 +110,10 @@ function world(on: On, grant: string = 'high'): World {
     const last = e.argv.slice(-2)
     let stdout = ''
     if (a.includes('effort-window.sh grant')) stdout = grant
+    else if (a.includes('--subagent-model')) {
+      const base = last[1] as string
+      stdout = base !== '' ? base : w.methods.subagent_sonnet?.active === 1 ? 'sonnet' : '-'
+    }
     else if (a.includes('ps -o args=')) stdout = w.parentArgs
     else if (a.includes('--band')) {
       reads += 1
@@ -140,7 +144,9 @@ function world(on: On, grant: string = 'high'): World {
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('env.set', ($, e) => {
-    w.envSets.push(e.value)
+    // The effort tests count only the effort variables (subagent_sonnet's are
+    // read back from env).
+    if (!e.name.includes('SUBAGENT_MODEL')) w.envSets.push(e.value)
     env.set(e.name, e.value)
     return { value: undefined }
   })
@@ -965,3 +971,30 @@ describe('effort grant: the app\'s picker (AIO-868, option 1)', () => {
   })
 })
 
+describe('subagent_sonnet', () => {
+  test('a sub-agent starts on Sonnet while the method is on, on the default once it is bypassed, and the person\'s own value is kept', async ($, on) => {
+    const w = world(on, 'high')
+    const models: (string | undefined)[] = []
+    on('agent.spawn', ($, e) => {
+      models.push(w.env.get('CLAUDE_CODE_SUBAGENT_MODEL'))
+      return { model: 'parent' }
+    })
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    expect(w.env.get('AIONAS_SUBAGENT_MODEL_BASE')).toBe('-')
+    const spawn = () => $.agent.spawn({ prompt: 'hi' })
+    await spawn()
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
+    await spawn()
+    expect(models).toEqual(['sonnet', undefined])
+    // A reload (session.start again) keeps the value the process started with.
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 1, until: 0 }
+    await spawn()
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    expect(w.env.get('AIONAS_SUBAGENT_MODEL_BASE')).toBe('-')
+    // The person's own value.
+    w.env.set('AIONAS_SUBAGENT_MODEL_BASE', 'opus')
+    w.env.set('CLAUDE_CODE_SUBAGENT_MODEL', 'opus')
+    await spawn()
+    expect(models).toEqual(['sonnet', undefined, 'sonnet', 'opus'])
+  })
+})

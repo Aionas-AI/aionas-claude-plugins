@@ -15,7 +15,7 @@ It takes effect from the next session.
 
 ## What runs
 
-Every hook is `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"` (bash on macOS and Linux, Git Bash on Windows), listed in `hooks/hooks.json`. SessionStart hooks never delay the session: all are async except `unused-services-notice.sh`, which only reads a local file and prints the one-line notice of the MCP servers and skills that were turned off for 30 days without calls. Turn one back on with `/mcp`.
+Every hook is `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"` (bash on macOS and Linux, Git Bash on Windows), listed in `hooks/hooks.json`. SessionStart hooks never delay the session: all are async except two that only read local files and print. `unused-services-notice.sh` prints the one-line notice of the MCP servers and skills that were turned off for 30 days without calls (turn one back on with `/mcp`). `write-minimum.sh` prints the "write the minimum" paragraph as session context, byte for byte the lab's tested file (AIO‑889).
 
 The mod (the band above the prompt, the slash commands, the effort grant) is `hooks/mod.tsx`. The band shows in the terminal and the desktop app, not in VS Code (Claude Code 2.1.299).
 

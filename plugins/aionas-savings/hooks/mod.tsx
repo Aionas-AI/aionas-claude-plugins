@@ -20,7 +20,6 @@
 //   session is left to the settings cap (maxEffortLevel=high); an older
 //   install's pin (CLAUDE_CODE_EFFORT_LEVEL) is moved by /effort for the
 //   session it is typed in.
-// - The "write the minimum" skill expands to a no-op when the method is off.
 // - The handoff row (AIO-874): the minutes left until the handoff doc, with
 //   "Done with this chat" (also /aionas-done: no doc for this session); after
 //   the doc, the minutes left until the session's prompt cache runs out; once
@@ -402,17 +401,6 @@ export const register: Register = on => {
   on('command.run', { command: 'aionas-xhigh' }, async ($, e) => {
     const r = await run($, [script($.plugin.root, 'commands/aionas-xhigh.sh'), ...splitArgs(e.args)])
     return { text: r.out || 'aionas-xhigh could not run (bash was not found).', exitCode: r.code === 0 ? 0 : 1 }
-  })
-
-  on('skill.prompt', async ($, e, next) => {
-    if (e.pluginName !== 'aionas-savings' || !e.skill.endsWith('write-minimum')) return next(e)
-    const row = st.facts?.methods.find(m => m.id === 'write_minimum')
-    if (row !== undefined && !row.isActive) {
-      void bypass($, ['--count', 'write_minimum', 'skipped'])
-      return { text: 'The Aionas "write the minimum" method is off for you right now. Ignore this skill and work as usual.' }
-    }
-    void bypass($, ['--count', 'write_minimum', 'fired'])
-    return next(e)
   })
 
   // After a main-loop turn, and again once the handoff timer has had time to

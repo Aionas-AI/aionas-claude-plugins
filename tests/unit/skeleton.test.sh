@@ -32,7 +32,7 @@ entries() {
 test_hooks_json_registers_every_lane_entry() {
   local got
   got=$(entries | awk -F '\037' '{ c = $3; sub(/.*\/hooks\//, "", c); sub(/\\".*/, "", c); print $1 "/" $2 "/" c }' | sort | tr '\n' ' ')
-  t_eq "PostToolUse//output-store.sh PreToolUse/Bash/noisy-guard.sh SessionStart//daily-scan.sh SessionStart//effort-window.sh SessionStart//policy-sync.sh SessionStart//unused-services-notice.sh SessionStart//unused-services.sh Stop//counters-flush.sh Stop//handoff-arm.sh UserPromptSubmit//handoff-cancel.sh " "$got"
+  t_eq "PostToolUse//output-store.sh PreToolUse/Bash/noisy-guard.sh SessionStart//daily-scan.sh SessionStart//effort-window.sh SessionStart//plan-report.sh SessionStart//policy-sync.sh SessionStart//unused-services-notice.sh SessionStart//unused-services.sh SessionStart//write-minimum.sh Stop//counters-flush.sh Stop//handoff-arm.sh UserPromptSubmit//handoff-cancel.sh " "$got"
 }
 
 test_hook_commands_point_at_executable_scripts() {
@@ -57,12 +57,17 @@ test_session_start_never_blocks() {
     [ "$ev" = SessionStart ] || continue
     [ "$a" = true ] && continue
     sync="$sync $(basename "${cmd%\\\"}")"
-    t_contains "$cmd" 'hooks/unused-services-notice.sh' "SessionStart entry not async: $cmd"
-    t_eq 5 "$to" "the sync notice needs timeout 5"
+    t_eq 5 "$to" "a sync SessionStart entry needs timeout 5: $cmd"
   done < <(entries)
-  t_eq " unused-services-notice.sh" "$sync" "the only sync SessionStart entry"
-  t_lacks "$(cat "$T_PLUGIN/hooks/unused-services-notice.sh")" "aionas_http" "the notice must not use the network"
-  t_lacks "$(cat "$T_PLUGIN/hooks/unused-services-notice.sh")" "curl" "the notice must not use the network"
+  # Only these two print to the session (an async hook's output is not used):
+  # the turned-off-services notice and write_minimum's context (AIO-889).
+  # Both read local files only.
+  t_eq " unused-services-notice.sh write-minimum.sh" "$sync" "the only sync SessionStart entries"
+  local f
+  for f in unused-services-notice.sh write-minimum.sh; do
+    t_lacks "$(cat "$T_PLUGIN/hooks/$f")" "aionas_http" "$f must not use the network"
+    t_lacks "$(cat "$T_PLUGIN/hooks/$f")" "curl" "$f must not use the network"
+  done
 }
 
 # The notice, run the way hooks.json runs it: silent when nothing is pending,

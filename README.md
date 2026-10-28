@@ -9,7 +9,9 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 - the handoff document,
 - effort capped at high, with the `/aionas-xhigh` window that allows xhigh or max for sessions opened in the next 10 minutes,
 - tool output trimming (`output_trim`): the noisy-command guard and the long-output store as one method, off unless the organization turns it on (0.2.0, AIO‑883),
-- the "write the minimum" skill.
+- "write the minimum": one paragraph added at session start, exactly as the lab tested it (0.3.0, AIO‑889).
+
+It also reports which Claude plan this computer is signed in to (plan and account id only), so a fix to plan detection reaches installed computers through the plugin's auto-update (0.3.0, AIO‑888).
 
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
 
@@ -42,9 +44,11 @@ tests/                                   make test
 |---|---|---|---|
 | SessionStart | `policy-sync.sh` | async | AIO‑855 |
 | SessionStart | `daily-scan.sh` | async | AIO‑854 |
+| SessionStart | `plan-report.sh` | async | AIO‑888 |
 | SessionStart | `effort-window.sh` | async | AIO‑859 |
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |
+| SessionStart | `write-minimum.sh` | 5 s, not async | AIO‑889 |
 | UserPromptSubmit | `handoff-cancel.sh` | 5 s | AIO‑858 |
 | PreToolUse (Bash) | `noisy-guard.sh` | 10 s | AIO‑860, `output_trim` (AIO‑883) |
 | PostToolUse | `output-store.sh` | 30 s | AIO‑860, `output_trim` (AIO‑883) |

@@ -29,7 +29,7 @@ test_flush_sends_summed_numbers_only() {
   local args; args=$(t_call 1 args | tr '\n' ' ')
   t_contains "$args" "--connect-timeout 3 "
   t_contains "$args" "--max-time 5 "
-  t_eq '{"plugin_version":"0.2.0","counters":[{"day":"2026-10-20","method_id":"output_trim","counter":"fired","value":3},{"day":"2026-10-20","method_id":"output_trim","counter":"bypass","value":1},{"day":"2026-10-19","method_id":"output_trim","counter":"fired","value":1}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.3.0","counters":[{"day":"2026-10-20","method_id":"output_trim","counter":"fired","value":3},{"day":"2026-10-20","method_id":"output_trim","counter":"bypass","value":1},{"day":"2026-10-19","method_id":"output_trim","counter":"fired","value":1}]}' "$(t_call 1 body)"
   t_ok test ! -e "$(CD)/pending.tsv"
   t_eq "$T0" "$(cat "$(CD)/last_sent")"
 }
@@ -46,7 +46,7 @@ test_body_is_strictly_names_and_numbers() {
   t_lacks "$body" secret
   local rest
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"[a-z_]+","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.2.0","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.2.0"/"0.2.0",/')"
+  t_eq '{"plugin_version":"0.3.0","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.3.0"/"0.3.0",/')"
 }
 
 test_flush_is_hourly() {

@@ -2,6 +2,17 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
+## 0.4.0 (2026-10-29)
+
+**Security hardening: this plugin runs on customer computers and updates itself from a public repository.**
+
+- The daily scan runs the scanner only from where the installer puts it (`$AIONAS_SCAN_BIN`, `~/.aionas/agent/tools`, `~/.aionas/agent/bin`), never from `PATH`: a project or package could put its own `aionas-scan` there and have it run detached.
+- The gateway address in the enrollment file must be `https://`; plain `http://` is accepted only for `localhost` and `127.0.0.1`.
+- The `npm install` rule no longer adds `--no-audit`, so npm's vulnerability audit is never switched off.
+- Band names drop C1 control and bidirectional-override characters, so a name from the policy cannot reorder or hide what the band shows.
+- `security/egress-manifest.txt` lists every file, hook, network call and gateway endpoint the plugin uses; CI fails when the code and the list disagree.
+- The marketplace sets `forceRemoveDeletedPlugins`, so taking the plugin out of the catalog removes it from every computer.
+
 ## 0.3.1 (2026-10-28)
 
 **Turning off "Sonnet for sub-agents" now brings sub-agents back to the person's own setting (AIO-884).**

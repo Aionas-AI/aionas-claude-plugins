@@ -53,9 +53,9 @@ pytest~AIONAS_GUARD=pytest pytest -q
 pytest tests/unit -k "slow and not db"~AIONAS_GUARD=pytest pytest -q tests/unit -k "slow and not db"
 python -m pytest tests~AIONAS_GUARD=pytest python -m pytest -q tests
 python3 -m pytest~AIONAS_GUARD=pytest python3 -m pytest -q
-npm install~AIONAS_GUARD=npm_install npm install --no-audit --no-fund --no-progress
-npm i lodash~AIONAS_GUARD=npm_install npm i --no-audit --no-fund --no-progress lodash
-npm ci~AIONAS_GUARD=npm_install npm ci --no-audit --no-fund --no-progress
+npm install~AIONAS_GUARD=npm_install npm install --no-fund --no-progress
+npm i lodash~AIONAS_GUARD=npm_install npm i --no-fund --no-progress lodash
+npm ci~AIONAS_GUARD=npm_install npm ci --no-fund --no-progress
 git log~AIONAS_GUARD=git_log git log -n 30 --oneline
 git log --author=tal -- src~AIONAS_GUARD=git_log git log -n 30 --oneline --author=tal -- src
 cat big.log~

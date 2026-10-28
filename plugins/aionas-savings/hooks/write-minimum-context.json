@@ -1,0 +1,6 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "Write the minimum code that does the job: only make the changes the task needs. Don't add helpers, abstractions, configuration or error handling for scenarios that can't happen. If you find a pre-existing bug or behavior the task doesn't mention, don't fix or extend it unless the requested behavior cannot work without it; mention it in your summary instead."
+  }
+}

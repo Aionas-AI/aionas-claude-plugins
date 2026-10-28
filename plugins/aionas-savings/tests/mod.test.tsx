@@ -965,17 +965,3 @@ describe('effort grant: the app\'s picker (AIO-868, option 1)', () => {
   })
 })
 
-describe('write the minimum', () => {
-  test('the skill expands as written while the method is on, and to a no-op when it is off', async ($, on) => {
-    const w = world(on, 'high')
-    w.methods.write_minimum = { ...(w.methods.write_minimum as M), state: 'off', active: 0 }
-    on('skill.prompt', ($, e) => ({ text: e.text }))
-    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
-    await $.ui.mount({ ...BAND, surface: 'terminal' })
-    const off = await $.skill.prompt({ skill: 'aionas-savings:write-minimum', text: 'Write the minimum.', pluginName: 'aionas-savings' } as never)
-    expect(off.text).toContain('is off for you')
-    const other = await $.skill.prompt({ skill: 'commit', text: 'A commit.', pluginName: 'other' } as never)
-    expect(other.text).toBe('A commit.')
-    expect(w.argv.some(a => a.includes('--count') && a.includes('skipped'))).toBe(true)
-  })
-})

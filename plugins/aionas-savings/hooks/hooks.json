@@ -39,6 +39,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services-notice.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/write-minimum.sh\"",
+            "timeout": 5
           }
         ]
       }

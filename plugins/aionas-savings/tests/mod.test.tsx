@@ -997,4 +997,17 @@ describe('subagent_sonnet', () => {
     await spawn()
     expect(models).toEqual(['sonnet', undefined, 'sonnet', 'opus'])
   })
+
+  test('a sub-agent started before session start saves the person\'s own value first and keeps it', async ($, on) => {
+    const w = world(on, 'high')
+    const models: (string | undefined)[] = []
+    on('agent.spawn', ($, e) => {
+      models.push(w.env.get('CLAUDE_CODE_SUBAGENT_MODEL'))
+      return { model: 'parent' }
+    })
+    w.env.set('CLAUDE_CODE_SUBAGENT_MODEL', 'opus')
+    await $.agent.spawn({ prompt: 'hi' })
+    expect(w.env.get('AIONAS_SUBAGENT_MODEL_BASE')).toBe('opus')
+    expect(models).toEqual(['opus'])
+  })
 })

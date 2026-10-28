@@ -9,7 +9,7 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 - the handoff document,
 - effort capped at high, with the `/aionas-xhigh` window that allows xhigh or max for sessions opened in the next 10 minutes,
 - tool output trimming (`output_trim`): the noisy-command guard and the long-output store as one method, off unless the organization turns it on (0.2.0, AIO‑883),
-- Sonnet for sub-agents that pick no model (`subagent_sonnet`), set inside the running session only; turned off (the band's chip, `/aionas-bypass`, or the organization), sub-agents are back on the person's own setting from the next sub-agent, and `settings.json` is never written (0.3.1, AIO‑884),
+- Sonnet for sub-agents that pick no model (`subagent_sonnet`), set inside the running session only; turned off (the band's chip, `/aionas-bypass`, or the organization), sub-agents are back on the person's own setting (a bypass from the next sub-agent, the organization from the next session), and `settings.json` is never written (0.3.1, AIO‑884),
 - "write the minimum": one paragraph added at session start, exactly as the lab tested it (0.3.0, AIO‑889).
 
 It also reports which Claude plan this computer is signed in to (plan and account id only), so a fix to plan detection reaches installed computers through the plugin's auto-update (0.3.0, AIO‑888).

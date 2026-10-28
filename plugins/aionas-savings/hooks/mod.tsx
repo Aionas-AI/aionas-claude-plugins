@@ -140,9 +140,19 @@ async function bypass($: EngineInterface, args: string[]): Promise<Ran> {
 // then), and taken off again once the method is off, released or bypassed.
 // The person's settings.json is never written. The value the process started
 // with is kept in AIONAS_SUBAGENT_MODEL_BASE ("-" for none), so a reload of
-// this module does not take Aionas's own Sonnet for the person's.
+// this module does not take Aionas's own Sonnet for the person's. It is saved
+// at session start, or at the first sub-agent if session start never ran.
+async function subagentBase($: EngineInterface): Promise<string> {
+  let base = await $.env.get('AIONAS_SUBAGENT_MODEL_BASE')
+  if (base === undefined) {
+    base = (await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) ?? '-'
+    await $.env.set('AIONAS_SUBAGENT_MODEL_BASE', base)
+  }
+  return base
+}
+
 async function subagentModel($: EngineInterface): Promise<void> {
-  const base = (await $.env.get('AIONAS_SUBAGENT_MODEL_BASE')) ?? '-'
+  const base = await subagentBase($)
   const r = await bypass($, ['--subagent-model', base === '-' ? '' : base])
   if (r.code !== 0 || r.out === '') return
   const want = r.out === '-' ? undefined : r.out
@@ -325,9 +335,7 @@ export const register: Register = on => {
     st.bash = (await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')) ?? 'bash'
     st.baseExtra = await $.env.get('CLAUDE_CODE_EXTRA_BODY')
     st.baseUrl = await $.env.get('ANTHROPIC_BASE_URL')
-    if ((await $.env.get('AIONAS_SUBAGENT_MODEL_BASE')) === undefined) {
-      await $.env.set('AIONAS_SUBAGENT_MODEL_BASE', (await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) ?? '-')
-    }
+    await subagentBase($)
     // Not awaited: the session never waits on a process; a request waits only
     // in the rare case it is sent before the grant is read.
     st.sent = undefined

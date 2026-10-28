@@ -2,7 +2,7 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
-## 0.3.0 (unreleased)
+## 0.3.1 (2026-10-28)
 
 **Turning off "Sonnet for sub-agents" now brings sub-agents back to the person's own setting (AIO-884).**
 
@@ -13,6 +13,11 @@ Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude
 - New: `aionas-bypass.sh --subagent-model BASE` (the decision), the mod's `agent.spawn` hook, and `AIONAS_SUBAGENT_MODEL` in `lib/catalog.sh`.
 - Proof: real Claude Code 2.1.311 against a local mock of the Messages API, two sub-agents per session (lab `probes/subagent-sonnet-off/midsession`, `run-plugin.sh`). On, then bypassed between them: Sonnet then the default. Install-written Sonnet, then bypassed: Sonnet then the default. The person's own opus: opus both times. Bypassed, then ended: the default then Sonnet. Off by the organization: the default both times. 0.2.0 on the same case: Sonnet both times.
 - To follow, in the gateway repo (AIO-885): the one install stops writing the variable and takes back the value an older install wrote. That ships after this release.
+
+## 0.3.0 (2026-10-28)
+
+- The plugin reports which Claude plan this computer is signed in to (plan and account id only), once a UTC day and as soon as it changes, with the installer's rule: Team on rate-limit tier `default_claude_max_5x` is Team premium (AIO-888). A failed send is retried at the next session start, silently.
+- "Write the minimum" is one paragraph added at session start, byte for byte the lab's tested `additional-context.json`, instead of a skill; the skill and its mod gate are gone. Each session start counts `fired` (method on) or `skipped` (off, released or bypassed) (AIO-889).
 
 ## 0.2.0 (2026-10-27)
 

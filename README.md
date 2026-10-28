@@ -11,6 +11,8 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 - tool output trimming (`output_trim`): the noisy-command guard and the long-output store as one method, off unless the organization turns it on (0.2.0, AIO‑883),
 - the "write the minimum" skill.
 
+It also reports which Claude plan this computer is signed in to (plan and account id only), so a fix to plan detection reaches installed computers through the plugin's auto-update (0.2.1, AIO‑888).
+
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
 
 **Install by hand** (the same two steps the one install does, in a Claude Code session):
@@ -42,6 +44,7 @@ tests/                                   make test
 |---|---|---|---|
 | SessionStart | `policy-sync.sh` | async | AIO‑855 |
 | SessionStart | `daily-scan.sh` | async | AIO‑854 |
+| SessionStart | `plan-report.sh` | async | AIO‑888 |
 | SessionStart | `effort-window.sh` | async | AIO‑859 |
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |

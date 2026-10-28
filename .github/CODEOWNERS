@@ -1,0 +1,4 @@
+# Everything in this repository runs on customer computers. Every change needs
+# the approval of this human-only account (no token on any machine that runs
+# agents), enforced by the main-protected ruleset.
+* @talchaimdamri

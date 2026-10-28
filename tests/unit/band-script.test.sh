@@ -129,7 +129,7 @@ test_band_handoff_line_from_the_session_state() { # AIO-874
 test_band_gateway_host_and_local_offset() {
   t_enroll "https://GW.Example.test:8443/base/path"
   t_eq "$(printf 'gateway_host\tgw.example.test:8443')" "$(line "$(band)" gateway_host)"
-  t_eq 10800 "$(TZ=Asia/Jerusalem band | awk -F '\t' '$1 == "clock" { print $3 }')"
+  t_eq 10800 "$(TZ=Etc/GMT-3 band | awk -F '\t' '$1 == "clock" { print $3 }')"
   t_eq -18000 "$(TZ=EST band | awk -F '\t' '$1 == "clock" { print $3 }')"
   t_eq 0 "$(t_calls)" "--band never calls the gateway"
 }

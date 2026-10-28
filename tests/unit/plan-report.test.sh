@@ -107,6 +107,14 @@ test_a_malformed_account_id_is_left_out() {
   t_eq team_standard "$(sent_plan)"
 }
 
+test_an_empty_field_does_not_shift_the_others() {
+  t_enroll; export AIONAS_NOW=$T0
+  claude_json invoice claude_team ""
+  hook
+  t_eq team_standard "$(sent_plan)"
+  t_contains "$(t_call 1 body)" "\"account_uuid\":\"$UUID\""
+}
+
 test_claude_config_dir_is_honoured() {
   t_enroll; export AIONAS_NOW=$T0
   export CLAUDE_CONFIG_DIR="$HOME/cfg"; mkdir -p "$CLAUDE_CONFIG_DIR"

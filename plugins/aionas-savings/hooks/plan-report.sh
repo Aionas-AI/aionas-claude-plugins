@@ -22,8 +22,9 @@ fields=$(aionas_json_flatten "$cj" 2>/dev/null | awk -F '\t' '
   $1 == "oauthAccount.organizationType" { ot = $3 }
   $1 == "oauthAccount.organizationRateLimitTier" { tier = $3 }
   $1 == "oauthAccount.accountUuid" { u = $3 }
-  END { printf "%s\t%s\t%s\t%s\n", bt, ot, tier, u }') || exit 0
-IFS="$(printf '\t')" read -r bt ot tier acct <<EOF
+  END { printf "%s\037%s\037%s\037%s\n", bt, ot, tier, u }') || exit 0
+# \037, not a tab: a tab is IFS whitespace, so an empty field would shift the rest.
+IFS="$(printf '\037')" read -r bt ot tier acct <<EOF
 $fields
 EOF
 

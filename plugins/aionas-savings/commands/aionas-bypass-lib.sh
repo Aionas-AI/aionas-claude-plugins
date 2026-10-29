@@ -488,3 +488,29 @@ aionas_policy_sync_due() {
   aionas_is_uint "$_sd_t" || return 1
   [ $(($(aionas_now) - _sd_t)) -ge "$AIONAS_POLICY_SYNC_INTERVAL" ]
 }
+
+# aionas_subagent_model BASE [SESSION]: print the value this session's
+# CLAUDE_CODE_SUBAGENT_MODEL should have now, or "-" for unset. BASE is the
+# value the session started with ("" when unset). The person's own value is
+# kept whatever the method's state; Sonnet goes on only where the person set
+# nothing, or where the one install wrote it (its marker records that), and
+# comes off again while the method is off, released or bypassed. (The
+# install writes it only where the person had no value, so "off" is unset.)
+aionas_subagent_model() {
+  _sm_base=$1
+  if [ -n "$_sm_base" ]; then
+    _sm_mark=$(aionas_json_flatten "$(aionas_agent_dir)/state/backup/cc-savings.ours" 2>/dev/null)
+    _sm_k=keys.env.CLAUDE_CODE_SUBAGENT_MODEL
+    if [ "$(printf '%s\n' "$_sm_mark" | aionas_json_type "$_sm_k.ours")" != s ] ||
+      [ "$(printf '%s\n' "$_sm_mark" | aionas_json_get "$_sm_k.ours")" != "$_sm_base" ]; then
+      echo "$_sm_base"
+      return 0
+    fi
+  fi
+  aionas_policy_active subagent_sonnet "${2:-}"
+  case $? in
+    0) echo "$AIONAS_SUBAGENT_MODEL" ;;
+    1) echo - ;;
+    *) return 1 ;;
+  esac
+}

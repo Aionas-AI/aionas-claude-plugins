@@ -297,7 +297,7 @@ test_only_counts_reach_the_server() {
   t_eq "https://gw.example.test/enroll/v1/savings/counters" "$(t_call 1 url)"
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"output_trim","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
   # One method now (AIO-883): fired, bypass and skipped.
-  t_eq '{"plugin_version":"0.3.0","counters":[,,]}' "$rest"
+  t_eq '{"plugin_version":"0.3.1","counters":[,,]}' "$rest"
   all=$(cat "$FAKE_CURL_LOG"/*/* 2>/dev/null)
   for n in SECRET hunter2 deploy secrets.env build line; do t_lacks "$all" "$n" "content sent"; done
 }

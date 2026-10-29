@@ -7,6 +7,9 @@
 # one method, off unless the organization turns it on.
 AIONAS_METHODS="handoff effort_default subagent_sonnet unused_services output_trim write_minimum cache_alert seat_fit cache_guard tool_search dispatcher"
 AIONAS_REQUIRED_METHODS="cache_guard"
+
+# subagent_sonnet's model: the alias the one install writes too.
+AIONAS_SUBAGENT_MODEL=sonnet
 # Methods that are off when the policy has no row for them (every other
 # method is on: W24-1).
 AIONAS_DEFAULT_OFF_METHODS="output_trim"

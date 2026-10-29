@@ -30,6 +30,11 @@
 #                                self_override, then compact_at <tokens>
 #   aionas-bypass.sh --count METHOD COUNTER
 #                                add one to a counter (the mod's counting)
+#   aionas-bypass.sh --subagent-model BASE
+#                                the sub-agent model this session should run
+#                                on now ("-" for none), from the value it
+#                                started with (BASE, "" for none); the mod sets
+#                                it before each sub-agent starts
 #
 # Prints one line for the person. Exit 0 on success, 1 when nothing was done,
 # 2 for a usage error.
@@ -78,6 +83,11 @@ if [ "${1:-}" = --end ]; then
   esac
   echo "Could not end the bypass of $method."
   exit 1
+fi
+
+if [ "${1:-}" = --subagent-model ]; then
+  aionas_subagent_model "${2:-}" "$SID"
+  exit $?
 fi
 
 if [ "${1:-}" = --count ]; then

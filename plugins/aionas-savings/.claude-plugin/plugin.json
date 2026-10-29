@@ -1,6 +1,6 @@
 {
   "name": "aionas-savings",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Aionas savings methods for Claude Code: your organization's savings policy, applied on this computer. Only numbers and names leave the computer.",
   "author": {
     "name": "Aionas"

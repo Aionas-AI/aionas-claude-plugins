@@ -194,4 +194,38 @@ test_bodies_carry_no_content_beyond_the_typed_reason() {
   t_lacks "$(t_call 1 args; t_call 2 args)" "$T_ALIAS"
 }
 
+# subagent_sonnet: the sub-agent model the mod sets before each sub-agent.
+install_marker() { # the one install's record that it wrote MODEL
+  mkdir -p "$HOME/.aionas/agent/state/backup"
+  printf '{"version":1,"keys":{"env.CLAUDE_CODE_SUBAGENT_MODEL":{"ours":"%s"}},"parents":["env"]}' "$1" >"$HOME/.aionas/agent/state/backup/cc-savings.ours"
+}
+
+test_subagent_model_on_off_and_back() {
+  t_eq sonnet "$(bash "$BYPASS" --subagent-model '')"
+  bash "$BYPASS" subagent_sonnet 1h >/dev/null
+  t_eq - "$(bash "$BYPASS" --subagent-model '')" "bypassed: back to the default"
+  bash "$BYPASS" --end subagent_sonnet >/dev/null
+  t_eq sonnet "$(bash "$BYPASS" --subagent-model '')"
+  aionas_mkdir "$(aionas_savings_dir)"
+  printf 'V\t1\nM\tsubagent_sonnet\toff\t0\t0\t1\t0\n' >"$(aionas_savings_dir)/policy.cache"
+  t_eq - "$(bash "$BYPASS" --subagent-model '')" "off by the org: the default"
+}
+
+test_subagent_model_keeps_the_persons_own_value() {
+  t_eq opus "$(bash "$BYPASS" --subagent-model opus)"
+  bash "$BYPASS" subagent_sonnet 1h >/dev/null
+  t_eq opus "$(bash "$BYPASS" --subagent-model opus)"
+  # Sonnet the person set (no install marker for it) is theirs too.
+  t_eq sonnet "$(bash "$BYPASS" --subagent-model sonnet)"
+  install_marker haiku
+  t_eq sonnet "$(bash "$BYPASS" --subagent-model sonnet)"
+}
+
+test_subagent_model_takes_off_the_install_written_value() {
+  install_marker sonnet
+  t_eq sonnet "$(bash "$BYPASS" --subagent-model sonnet)"
+  bash "$BYPASS" subagent_sonnet 1h >/dev/null
+  t_eq - "$(bash "$BYPASS" --subagent-model sonnet)" "the install's Sonnet comes off"
+}
+
 t_main "$@"

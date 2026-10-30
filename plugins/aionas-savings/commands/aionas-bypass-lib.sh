@@ -67,6 +67,11 @@ aionas_cmd_reason() {
     { s = s (NR > 1 ? " " : "") $0 }
     END {
       gsub(/[\001-\037\177]/, " ", s)
+      # C1 controls (U+0080-009F) and bidi marks (U+200E/F, U+202A-202E,
+      # U+2066-2069) as UTF-8 bytes: they could reorder or hide band text.
+      gsub(/\302[\200-\237]/, " ", s)
+      gsub(/\342\200[\216\217\252-\256]/, " ", s)
+      gsub(/\342\201[\246-\251]/, " ", s)
       gsub(/^ +| +$/, "", s)
       if (length(s) > max) {
         s = substr(s, 1, max); i = max
@@ -256,6 +261,9 @@ aionas_band_policy() {
     }
     function clean(s,   n, i, out, b, chars) {
       gsub(/[\001-\037\177]/, " ", s)
+      gsub(/\302[\200-\237]/, " ", s)
+      gsub(/\342\200[\216\217\252-\256]/, " ", s)
+      gsub(/\342\201[\246-\251]/, " ", s)
       gsub(/^ +| +$/, "", s)
       n = length(s); out = ""; chars = 0
       for (i = 1; i <= n; i++) {

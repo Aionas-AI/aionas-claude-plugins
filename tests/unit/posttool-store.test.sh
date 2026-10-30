@@ -130,7 +130,7 @@ test_a_failing_run_keeps_its_full_output_for_every_rule() {
   local c
   # Claude Code reports a non-zero exit as PostToolUseFailure (an error, no
   # tool_response): neither hook ever changes it.
-  for c in 'AIONAS_GUARD=pytest pytest -q' 'AIONAS_GUARD=npm_install npm install --no-audit --no-fund --no-progress' \
+  for c in 'AIONAS_GUARD=pytest pytest -q' 'AIONAS_GUARD=npm_install npm install --no-fund --no-progress' \
     'AIONAS_GUARD=git_log git log -n 30 --oneline' 'AIONAS_GUARD=cat_cap cat big.log' \
     'AIONAS_GUARD=grep_cap grep -rn x .' 'AIONAS_GUARD=sed_cap sed -n 1,900p f' './build.sh'; do
     t_eq "" "$(printf '{"session_id":"s1","hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":%s},"tool_use_id":"t1","error":%s}' \
@@ -297,7 +297,7 @@ test_only_counts_reach_the_server() {
   t_eq "https://gw.example.test/enroll/v1/savings/counters" "$(t_call 1 url)"
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"output_trim","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
   # One method now (AIO-883): fired, bypass and skipped.
-  t_eq '{"plugin_version":"0.3.1","counters":[,,]}' "$rest"
+  t_eq '{"plugin_version":"0.4.0","counters":[,,]}' "$rest"
   all=$(cat "$FAKE_CURL_LOG"/*/* 2>/dev/null)
   for n in SECRET hunter2 deploy secrets.env build line; do t_lacks "$all" "$n" "content sent"; done
 }

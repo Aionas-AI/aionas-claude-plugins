@@ -33,7 +33,7 @@ setting	store_tail	40
 setting	keep_lines_max	40
 setting	bytes_per_token	4
 rule	pytest	quiet	^(python3? -m )?pytest	 (-q+|--quiet|-v+|--verbose)( |=)	-q
-rule	npm_install	quiet	^npm (install|i|ci|add)	 (-s|--silent|-q|--quiet|-d+|--verbose|--loglevel|--no-progress)( |=)	--no-audit --no-fund --no-progress
+rule	npm_install	quiet	^npm (install|i|ci|add)	 (-s|--silent|-q|--quiet|-d+|--verbose|--loglevel|--no-progress)( |=)	--no-fund --no-progress
 rule	git_log	quiet	^git log	 (-n|-n ?[0-9]+|-[0-9]+|--max-count|--oneline|--format|--pretty|-p|--patch|--stat|--name-only|--name-status|-L|--since|--after|--until|--before|--graph)( |=)	-n 30 --oneline
 rule	cat_cap	cap	^cat	-	-
 rule	grep_cap	cap	^(grep|egrep|fgrep|rg)	-	-

@@ -10,7 +10,7 @@ aionas_enroll_gateway() {
   [ -r "$_eg_f" ] || return 1
   _eg_u=$(aionas_json_flatten "$_eg_f" 2>/dev/null | aionas_json_get gateway) || return 1
   _eg_u=${_eg_u%/}
-  printf '%s\n' "$_eg_u" | grep -Eq '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$' || return 1
+  printf '%s\n' "$_eg_u" | grep -Eq '^(https://[A-Za-z0-9.-]+|http://(localhost|127\.0\.0\.1))(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$' || return 1
   printf '%s\n' "$_eg_u"
 }
 

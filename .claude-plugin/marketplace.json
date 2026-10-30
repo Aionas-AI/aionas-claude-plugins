@@ -3,6 +3,7 @@
   "owner": {
     "name": "Aionas"
   },
+  "forceRemoveDeletedPlugins": true,
   "metadata": {
     "description": "Aionas plugins for Claude Code."
   },
@@ -11,7 +12,7 @@
       "name": "aionas-savings",
       "source": "./plugins/aionas-savings",
       "description": "Aionas savings methods for Claude Code: your organization's savings policy, applied on this computer. Only numbers and names leave the computer.",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "category": "productivity"
     }
   ]

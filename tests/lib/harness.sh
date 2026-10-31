@@ -20,7 +20,14 @@ t_fresh() {
   unset FAKE_CURL_STATUS FAKE_CURL_BODY FAKE_CURL_EXIT FAKE_CURL_SLEEP
   # shellcheck disable=SC1091
   . "$T_PLUGIN/lib/aionas.sh"
+  # Enrolled by default (the plugin does nothing without the alias);
+  # t_unenroll for the not-enrolled case, t_enroll for a gateway too.
+  mkdir -p "$HOME/.aionas/agent"
+  printf '%s\n' "$T_ALIAS" >"$HOME/.aionas/agent/credential"
 }
+
+# t_unenroll: a computer the one install never enrolled (no alias).
+t_unenroll() { rm -f "$HOME/.aionas/agent/credential"; }
 
 # t_enroll [GATEWAY]: what the one install leaves on an enrolled computer.
 t_enroll() {

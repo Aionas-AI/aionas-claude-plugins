@@ -16,6 +16,8 @@ It also reports which Claude plan this computer is signed in to (plan and accoun
 
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
 
+Without the one install the plugin does nothing: no method acts and the band stays hidden until the computer is enrolled (0.4.1).
+
 **Install by hand** (the same two steps the one install does, in a Claude Code session):
 
 ```

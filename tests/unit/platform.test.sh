@@ -46,6 +46,7 @@ test_catalog_closed_lists() {
 }
 
 test_enroll_reads_alias_and_gateway() {
+  t_unenroll
   t_not aionas_enroll_has_alias
   t_not aionas_enroll_gateway
   t_enroll https://gw.example.test/

@@ -405,6 +405,7 @@ aionas_band_handoff() {
 # tab separated, numbers and names only. Leads with "clock <now> <utc offset
 # seconds>" so the band shows local times the way this computer does.
 aionas_band() {
+  aionas_enroll_has_alias || return 0
   aionas_bypass_apply_ends "$1" >/dev/null 2>&1
   printf 'clock\t%s\t%s\n' "$(aionas_now)" "$(aionas_band_tz_offset)"
   aionas_band_policy "$(aionas_savings_dir)/policy.json"

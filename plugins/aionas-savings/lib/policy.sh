@@ -62,6 +62,9 @@ aionas_policy_pin() {
 # method outside the catalog.
 aionas_policy_state() {
   aionas_is_method "$1" || return 2
+  # Not enrolled (no alias from the one install): every method is off, so a
+  # copy of this public plugin installed by anyone else changes nothing.
+  aionas_enroll_has_alias || { echo off; return 0; }
   if aionas_is_required "$1"; then echo on; return 0; fi
   _st_row=$(_aionas_policy_row "$1" "${2:-}")
   if [ -z "$_st_row" ]; then

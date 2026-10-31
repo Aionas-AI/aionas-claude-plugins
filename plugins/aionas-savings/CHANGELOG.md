@@ -2,6 +2,10 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
+## 0.4.1 (2026-11-01)
+
+**Without the one install, the plugin does nothing.** The repository is public, so anyone can install the plugin by hand. On a computer the one install never enrolled (no alias in `~/.aionas/agent/credential`), every method is off, required ones too: no session context, sub-agents keep the person's own model, no handoff, no output trim, and the band draws nothing. Nothing was sent from such a computer before either; now nothing changes on it. An enrolled computer is unchanged: with no policy cached yet, every method is on as before.
+
 ## 0.4.0 (2026-10-29)
 
 **Security hardening: this plugin runs on customer computers and updates itself from a public repository.**

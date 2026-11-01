@@ -25,6 +25,12 @@
           },
           {
             "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/script-refresh.sh\"",
+            "async": true,
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/effort-window.sh\"",
             "async": true,
             "timeout": 10

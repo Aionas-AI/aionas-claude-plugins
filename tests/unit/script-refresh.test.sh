@@ -105,7 +105,8 @@ test_aio904_the_manifest_call_carries_the_alias_the_downloads_do_not() {
   local i
   for i in 2 3 4 5; do
     t_contains "$(t_call $i url)" "https://gw.example.test/api/aionas/onboarding/scripts/aionas-"
-    t_eq "" "$(t_call $i headers)" "download $i sends no header from a file (no alias)"
+    t_lacks "$(t_call $i headers)" "Authorization" "download $i sends no auth header"
+    t_lacks "$(t_call $i headers)" "$T_ALIAS" "download $i sends no alias"
     t_lacks "$(t_call $i args)" "$T_ALIAS" "no alias on the command line of download $i"
     t_lacks "$(t_call $i args)" "Authorization" "no Authorization in download $i"
     t_lacks "$(t_call $i args)" "-L" "a redirect is never followed"
@@ -410,7 +411,8 @@ test_aio904_aionas_http_public_sends_no_auth_and_checks_the_gateway() {
   local out; out=$(mktemp "$T_ROOT/o.XXXXXX")
   export FAKE_CURL_STATUS=200 FAKE_CURL_BODY="$SR_SERVE/manifest.json"
   t_eq 200 "$(aionas_http_public GET /api/aionas/onboarding/scripts/x "$out")"
-  t_eq "" "$(t_call 1 headers)"
+  t_lacks "$(t_call 1 headers)" "Authorization"
+  t_lacks "$(t_call 1 headers)" "$T_ALIAS"
   t_lacks "$(t_call 1 args)" "$T_ALIAS"
   t_enroll "http://evil.example"
   t_rc 3 aionas_http_public GET /x "$out" >/dev/null

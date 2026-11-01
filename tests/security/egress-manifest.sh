@@ -3,6 +3,7 @@
 #   file <path>              every file a plugin ships (a new script shows up here)
 #   hook <command>           every hooks.json command and module
 #   http <METHOD> <path>     every request to the enrolled gateway
+#   public <METHOD> <path>   every request to the enrolled gateway WITHOUT the alias
 #   net <path>: <tool>       any other network tool or API outside lib/http.sh
 #   mod <path>: <api>        every privileged mod API ($.http, $.process, $.fs)
 # tests/unit/egress-manifest.test.sh compares it with security/egress-manifest.txt,
@@ -22,6 +23,8 @@ code() { grep -vE '^[[:space:]]*(#|//)' "$1"; }
   done
   find plugins -type f ! -path '*/tests/*' ! -path '*/docs/*' | while IFS= read -r f; do
     code "$f" | grep -oE 'aionas_http (GET|POST|PUT|PATCH|DELETE) [^ ]+' | sed "s|^aionas_http |http |"
+    # a PUBLIC call (no alias): quotes and the variable tail of the path are dropped
+    code "$f" | grep -oE 'aionas_http_public (GET|POST|PUT|PATCH|DELETE) [^ ]+' | sed -E 's|^aionas_http_public |public |; s|"||g; s|[$].*$||'
     case "$f" in */lib/http.sh) continue ;; esac
     code "$f" | grep -oE '(^|[^A-Za-z_])(curl|wget|socat|telnet|ssh|scp|Invoke-WebRequest|Invoke-RestMethod)([^A-Za-z_-]|$)|/dev/(tcp|udp)/|(^|[^.A-Za-z_])fetch\(|XMLHttpRequest|WebSocket' |
       sed -E "s/^[^A-Za-z/]*//; s/[^A-Za-z(/]*$//; s|^|net $f: |"

@@ -650,3 +650,18 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
     </Box>
   )
 }
+
+// What the band says where Git Bash was not found (AIO-905): the scripts that
+// feed the band cannot run, so it draws this one plain line instead of nothing.
+export const NO_GIT_BASH = 'Aionas: Git Bash not found on this computer; savings methods are off'
+
+export function drawNotice($: EngineInterface, e: RenderInput<'AbovePrompt', 'terminal' | 'desktop'>, text: string) {
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box key="aionas-band" flexDirection="column">
+      <Box key="aionas-line" flexDirection="row">
+        <Text dimColor>{text}</Text>
+      </Box>
+    </Box>
+  )
+}

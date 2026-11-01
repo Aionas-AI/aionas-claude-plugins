@@ -405,6 +405,7 @@ aionas_band_handoff() {
 # tab separated, numbers and names only. Leads with "clock <now> <utc offset
 # seconds>" so the band shows local times the way this computer does.
 aionas_band() {
+  aionas_enroll_has_alias || return 0
   aionas_bypass_apply_ends "$1" >/dev/null 2>&1
   printf 'clock\t%s\t%s\n' "$(aionas_now)" "$(aionas_band_tz_offset)"
   aionas_band_policy "$(aionas_savings_dir)/policy.json"
@@ -521,4 +522,19 @@ aionas_subagent_model() {
     1) echo - ;;
     *) return 1 ;;
   esac
+}
+
+# aionas_subagent_count [SESSION]: count one sub-agent start for
+# subagent_sonnet (W25P-P4, AIO-898 item 7): fired when the method is active
+# for this session (the test effort-window.sh uses for effort_default), else
+# skipped. One count per call; nothing is counted on a computer the one
+# install never enrolled. Prints nothing; exit 0 always.
+aionas_subagent_count() {
+  aionas_enroll_has_alias || return 0
+  if aionas_policy_active subagent_sonnet "${1:-}"; then
+    aionas_counter_inc subagent_sonnet fired >/dev/null 2>&1
+  else
+    aionas_counter_inc subagent_sonnet skipped >/dev/null 2>&1
+  fi
+  return 0
 }

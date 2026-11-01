@@ -16,6 +16,8 @@ It also reports which Claude plan this computer is signed in to (plan and accoun
 
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
 
+Without the one install the plugin does nothing: no method acts and the band stays hidden until the computer is enrolled (0.4.1).
+
 **Install by hand** (the same two steps the one install does, in a Claude Code session):
 
 ```
@@ -25,7 +27,7 @@ The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with a
 
 The plugin takes effect from the next session. Releases are git tags (`aionas-savings-vX.Y.Z`); with auto-update on, Claude Code follows the marketplace.
 
-**Privacy.** Only numbers and names leave the computer. The hourly counters send a method, a counter name and a count. The policy sync only downloads. Prompts, model replies, tool output and command arguments are never sent.
+**Privacy.** Apart from one text sent at most every 4 hours described next, only numbers and names leave the computer. The plugin runs Claude Code's own `/usage` command (a local command, no model call) at most once every 4 hours, on a session start on an enrolled computer signed in with a Claude subscription, when the status-line tap has no figure from the last 4 hours (this includes terminal users without the tap), and then sends the full text of its result to the organization's own gateway, by the owner's ruling; the gateway reads the weekly figure out of it, and the plugin does not parse it. That text includes Claude Code's own "What's contributing" section: local folder names, skill, sub-agent, MCP and plugin names, and request counts. It is at most 32 KiB (a larger result is not sent), and it is sent only to the gateway the computer is enrolled with, never anywhere else. Prompts, model replies, tool output and command arguments never leave. The child `claude -p "/usage"` is Claude Code's own call to Anthropic, made with the member's own login: Aionas never reads the login token, and `security/egress-manifest.txt` cannot list that call because the plugin does not make it. The probe starts only when the Claude login file has an account id (a member on an API key or routed through the gateway has none, and nothing is started). The hourly counters send a method, a counter name and a count. The policy sync only downloads.
 
 ### Layout
 
@@ -46,6 +48,8 @@ tests/                                   make test
 | SessionStart | `policy-sync.sh` | async | AIO‑855 |
 | SessionStart | `daily-scan.sh` | async | AIO‑854 |
 | SessionStart | `plan-report.sh` | async | AIO‑888 |
+| SessionStart | `script-refresh.sh` | async | AIO‑904 |
+| SessionStart | `usage-probe.sh` | async, 45 s | AIO‑892 |
 | SessionStart | `effort-window.sh` | async | AIO‑859 |
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |
@@ -72,6 +76,8 @@ Source it from a hook with `. "$(dirname "$0")/../lib/aionas.sh"`. It is POSIX s
 | `enroll.sh` | the enrollment alias and gateway from `~/.aionas/agent`. The alias goes only into a private header file, never onto a command line. |
 | `http.sh` | `aionas_http`: one try, with a 3 s connect timeout and 5 s in total |
 | `policy.sh` | `aionas_policy_sync`, `aionas_policy_pin <session>`, `aionas_policy_state` / `_active` / `_bypassed` / `_param` / `_self_override_allowed` / `_self_release_allowed`, `aionas_override_local_add` |
+| `claude-account.sh` | `_pr_uuid`, `_pr_clean_name`: the account id and cleaned organization name from Claude's login file (plan report and usage probe) |
+| `usage-probe.sh` | the usage probe: find the `claude` binary, run `/usage` at most once every 4 hours, send the whole result text as one `usage_cmd` sample (`usage_raw`); the gateway parses it (sourced by `hooks/usage-probe.sh` only) |
 | `counters.sh` | `aionas_counter_inc <method> <counter> [n]`, `aionas_counters_flush [--force]` (at most hourly) |
 
 **State.** The plugin keeps its state in `~/.aionas/agent/savings/`:

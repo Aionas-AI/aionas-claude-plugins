@@ -44,6 +44,9 @@ type World = {
   bandReads: () => number
   clock: MockClock
   toasts: string[]
+  // Windows only: the bash.exe paths that start (a `-c true` exits 0 there), and the paths recorded for support.
+  files: string[]
+  recorded: string[]
 }
 
 const ME = ['me', 'Noa Levi', 'Acme', 'member', 'Omer Katz', 'mbp-noa'].join('\t')
@@ -89,6 +92,8 @@ function world(on: On, grant: string = 'high'): World {
     bandReads: () => reads,
     clock: mock.clock(on, { now: T0 * 1000 }),
     toasts: [],
+    files: [],
+    recorded: [],
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-test-1' }))
@@ -109,7 +114,11 @@ function world(on: On, grant: string = 'high'): World {
     const a = e.argv.join(' ')
     const last = e.argv.slice(-2)
     let stdout = ''
-    if (a.includes('effort-window.sh grant')) stdout = grant
+    let exitCode = 0
+    if (e.argv[1] === '-c' && e.argv[2] === 'true') exitCode = w.files.includes(e.argv[0] as string) ? 0 : 127
+    else if (a.includes('git-bash-path')) w.recorded.push(last[1] as string)
+    else if (a.includes('effort-window.sh grant')) stdout = grant
+    else if (a.includes('--subagent-start')) stdout = ''
     else if (a.includes('--subagent-model')) {
       const base = last[1] as string
       stdout = base !== '' ? base : w.methods.subagent_sonnet?.active === 1 ? 'sonnet' : '-'
@@ -141,7 +150,7 @@ function world(on: On, grant: string = 'high'): World {
       w.window = `window\txhigh\t${w.now + 600}\thigh`
       stdout = 'Higher effort is allowed for 10 minutes: sessions you open now start at their usual level, and you may raise them to xhigh (Extra) or max with /effort.'
     }
-    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('env.set', ($, e) => {
     // The effort tests count only the effort variables (subagent_sonnet's are
@@ -998,6 +1007,21 @@ describe('subagent_sonnet', () => {
     expect(models).toEqual(['sonnet', undefined, 'sonnet', 'opus'])
   })
 
+  test('each sub-agent start runs the counting script exactly once, before the model decision, whatever the method state', async ($, on) => {
+    const w = world(on, 'high')
+    on('agent.spawn', () => ({ model: 'parent' }))
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    const calls = () => w.argv.map(a => a.join(' ')).filter(a => a.includes('--subagent-start') || a.includes('--subagent-model'))
+    await $.agent.spawn({ prompt: 'one' })
+    expect(calls().map(a => (a.includes('--subagent-start') ? 'count' : 'model'))).toEqual(['count', 'model'])
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
+    await $.agent.spawn({ prompt: 'two' })
+    expect(calls().filter(a => a.includes('--subagent-start'))).toHaveLength(2)
+    expect(calls().filter(a => a.includes('--subagent-model'))).toHaveLength(2)
+    // The count is the script's decision: the mod passes no method state and no counter name.
+    for (const a of w.argv.filter(x => x.join(' ').includes('--subagent-start'))) expect(a.slice(-1)).toEqual(['--subagent-start'])
+  })
+
   test('a sub-agent started before session start saves the person\'s own value first and keeps it', async ($, on) => {
     const w = world(on, 'high')
     const models: (string | undefined)[] = []
@@ -1009,5 +1033,175 @@ describe('subagent_sonnet', () => {
     await $.agent.spawn({ prompt: 'hi' })
     expect(w.env.get('AIONAS_SUBAGENT_MODEL_BASE')).toBe('opus')
     expect(models).toEqual(['opus'])
+  })
+})
+
+// AIO-905: the band never showed in Claude Desktop on Windows, because the
+// mod ran its scripts with the bare word "bash" from PATH. Paths below are
+// fixtures; the user folder is C:\Users\<user>.
+describe('Git Bash on Windows (AIO-905)', () => {
+  const PF = 'C:\\Program Files\\Git\\bin\\bash.exe'
+  const PF86 = 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'
+  const LOCAL = 'C:\\Users\\<user>\\AppData\\Local\\Programs\\Git\\bin\\bash.exe'
+  const SYSTEM32 = 'C:\\Windows\\System32\\bash.exe'
+  const NOT_FOUND = 'Aionas: Git Bash not found on this computer; savings methods are off'
+
+  // A Windows desktop: the bash.exe files that start and the environment
+  // Desktop passes (no CLAUDE_CODE_GIT_BASH_PATH).
+  function windows(on: On, files: string[], vars: Record<string, string> = {}): World {
+    const w = world(on)
+    w.files = files
+    const env: Record<string, string> = {
+      OS: 'Windows_NT',
+      ProgramFiles: 'C:\\Program Files',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      LOCALAPPDATA: 'C:\\Users\\<user>\\AppData\\Local',
+      ...vars,
+    }
+    for (const [k, v] of Object.entries(env)) w.env.set(k, v)
+    return w
+  }
+
+  // The scripts the band and the commands run (not the existence probes or the support record).
+  const scripts = (w: World): string[] =>
+    w.argv.filter(a => !(a[1] === '-c' && a[2] === 'true') && !a.join(' ').includes('git-bash-path')).map(a => a[0] as string)
+  const probes = (w: World): string[] => w.argv.filter(a => a[1] === '-c' && a[2] === 'true').map(a => a[0] as string)
+
+  test('no CLAUDE_CODE_GIT_BASH_PATH and Git under Program Files: every script runs with that exact path, and the band draws', async ($, on) => {
+    const w = windows(on, [PF])
+    await start($)
+    expect(scripts(w).length).toBeGreaterThan(0)
+    expect(new Set(scripts(w))).toEqual(new Set([PF]))
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi/ })).toBeDefined()
+    expect(await ui.find({ text: NOT_FOUND })).toBeUndefined()
+    await ui.unmount()
+    // The one local support record: the path, once.
+    expect(w.recorded).toEqual([PF])
+  })
+
+  test('CLAUDE_CODE_GIT_BASH_PATH set to a file that starts wins over the standard folders', async ($, on) => {
+    const own = 'D:\\Tools\\Git\\bin\\bash.exe'
+    const w = windows(on, [own, PF], { CLAUDE_CODE_GIT_BASH_PATH: own })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([own]))
+    expect(w.recorded).toEqual([own])
+    expect(probes(w)).toEqual([own])
+  })
+
+  test('CLAUDE_CODE_GIT_BASH_PATH set to a file that is not there falls back to the standard folders', async ($, on) => {
+    const w = windows(on, [PF], { CLAUDE_CODE_GIT_BASH_PATH: 'D:\\Gone\\bash.exe' })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([PF]))
+  })
+
+  test('the standard folders are tried in order: Program Files, Program Files (x86), then the per-user install', async ($, on) => {
+    const w = windows(on, [PF86, LOCAL])
+    await start($)
+    expect(probes(w).slice(0, 2)).toEqual([PF, PF86])
+    expect(new Set(scripts(w))).toEqual(new Set([PF86]))
+  })
+
+  test('only the per-user install present: it is used', async ($, on) => {
+    const w = windows(on, [LOCAL])
+    await start($)
+    expect(probes(w)).toEqual([PF, PF86, LOCAL])
+    expect(new Set(scripts(w))).toEqual(new Set([LOCAL]))
+  })
+
+  test('Windows\' own bash.exe (the WSL launcher) is never used, not even when the variable names it', async ($, on) => {
+    const w = windows(on, [SYSTEM32, 'C:\\Windows\\sysnative\\bash.exe'], { CLAUDE_CODE_GIT_BASH_PATH: SYSTEM32 })
+    await start($)
+    expect(scripts(w)).toEqual([])
+    // never even started: the launcher is rejected before any probe
+    expect(probes(w)).not.toContain(SYSTEM32)
+    expect(w.recorded).toEqual([])
+  })
+
+  // A variable that is not an absolute path to bash.exe is never probed or
+  // used (a bare name would be found from the working folder or PATH), and
+  // the WSL check cannot be walked around with "..", a missing extension, a
+  // doubled separator or a trailing space.
+  const BAD_VARS: Array<[string, string]> = [
+    ['a bare bash', 'bash'],
+    ['a bare bash.exe', 'bash.exe'],
+    ['a relative path', 'Git\\bin\\bash.exe'],
+    ['a path with ..', 'C:\\Windows\\System32\\..\\System32\\bash.exe'],
+    ['a path with ..\\ out of Git', 'C:\\Program Files\\Git\\..\\..\\Windows\\System32\\bash.exe'],
+    ['an extension-less System32 path', 'C:\\Windows\\System32\\bash'],
+    ['an extension-less Git path', 'C:\\Program Files\\Git\\bin\\bash'],
+    ['a doubled separator', 'C:\\Windows\\System32\\\\bash.exe'],
+    ['a trailing space', 'C:\\Windows\\System32\\bash.exe '],
+    ['a trailing dot', 'C:\\Windows\\System32\\bash.exe.'],
+    ['a file that is not bash.exe', 'D:\\Tools\\Git\\bin\\sh.exe'],
+    ['a device path', '\\\\?\\C:\\Windows\\System32\\bash.exe'],
+  ]
+  for (const [name, bad] of BAD_VARS) {
+    test(`CLAUDE_CODE_GIT_BASH_PATH as ${name} is never probed or used; the standard folder wins`, async ($, on) => {
+      const w = windows(on, [bad, bad.trim(), PF], { CLAUDE_CODE_GIT_BASH_PATH: bad })
+      await start($)
+      expect(probes(w)).not.toContain(bad)
+      expect(new Set(scripts(w))).toEqual(new Set([PF]))
+    })
+  }
+
+  test('a doubled separator in a System32 path with no Git Bash anywhere: nothing runs', async ($, on) => {
+    const bad = 'C:\\Windows\\\\System32\\bash.exe'
+    const w = windows(on, [bad], { CLAUDE_CODE_GIT_BASH_PATH: bad })
+    await start($)
+    expect(probes(w)).toEqual([PF, PF86, LOCAL])
+    expect(scripts(w)).toEqual([])
+  })
+
+  test('a Program Files folder that is relative gives no candidate; the others are still tried', async ($, on) => {
+    const rel = 'Program Files\\Git\\bin\\bash.exe'
+    const w = windows(on, [rel, LOCAL], { ProgramFiles: 'Program Files', 'ProgramFiles(x86)': '..\\Program Files (x86)' })
+    await start($)
+    expect(probes(w)).toEqual([LOCAL])
+    expect(new Set(scripts(w))).toEqual(new Set([LOCAL]))
+  })
+
+  test('an absolute UNC path to bash.exe is accepted', async ($, on) => {
+    const unc = '\\\\server\\tools\\Git\\bin\\bash.exe'
+    const w = windows(on, [unc], { CLAUDE_CODE_GIT_BASH_PATH: unc })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([unc]))
+  })
+
+  test('only System32 bash present: no script runs, the band shows one plain line, the first message says the same', async ($, on) => {
+    const w = windows(on, [SYSTEM32])
+    await start($)
+    expect(scripts(w)).toEqual([])
+    expect(w.toasts).toEqual([`${NOT_FOUND}.`])
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ type: 'Text', text: NOT_FOUND })).toBeDefined()
+      expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
+      await ui.unmount()
+    }
+    // A command fails soft, still without starting a process.
+    const before = w.argv.length
+    const r = await $.command.run({ command: 'aionas-bypass', args: 'output_trim' } as never)
+    expect(r.text).toContain('could not run')
+    expect(w.argv.length).toBe(before)
+    expect(scripts(w)).toEqual([])
+    expect(w.recorded).toEqual([])
+  })
+
+  test('macOS and Linux are unchanged: the bare word, no probe, no support record', async ($, on) => {
+    const w = world(on)
+    await start($)
+    expect(new Set(w.argv.map(a => a[0]))).toEqual(new Set(['bash']))
+    expect(probes(w)).toEqual([])
+    expect(w.recorded).toEqual([])
+    expect(w.toasts).toEqual([])
+  })
+
+  test('macOS and Linux with the variable set: its value, as before', async ($, on) => {
+    const w = world(on)
+    w.env.set('CLAUDE_CODE_GIT_BASH_PATH', '/opt/homebrew/bin/bash')
+    await start($)
+    expect(new Set(w.argv.map(a => a[0]))).toEqual(new Set(['/opt/homebrew/bin/bash']))
+    expect(probes(w)).toEqual([])
   })
 })

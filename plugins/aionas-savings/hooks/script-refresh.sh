@@ -68,6 +68,11 @@ for _sr_n in $AIONAS_SR_NAMES; do
   if [ "$_sr_prevday" != "$today" ]; then rm -f "$tools/$_sr_n.prev"; fi
 done
 if [ "$_sr_prevday" != "$today" ]; then rm -f "$dir/script-refresh.prevday"; fi
+# A killed run's manifest download: removed by exact matched name, one at a time.
+for _sr_f in "$dir"/script-refresh.manifest.*; do
+  case "${_sr_f##*script-refresh.manifest.}" in '' | *[!0-9]*) continue ;; esac
+  if [ -f "$_sr_f" ] || [ -L "$_sr_f" ]; then rm -f -- "$_sr_f"; fi
+done
 
 # _sr_one NAME VERSION SHA256: refresh one script; returns 1 when it kept the old one.
 _sr_one() {
@@ -105,6 +110,10 @@ _sr_code=$(aionas_http GET /enroll/v1/scripts/manifest - "$_sr_mf" 2>/dev/null)
 [ "$_sr_code" = 200 ] || exit 0
 [ "$(wc -c <"$_sr_mf" 2>/dev/null | tr -d ' ')" -le 65536 ] 2>/dev/null || exit 0
 _sr_flat=$(aionas_json_flatten "$_sr_mf" 2>/dev/null) || exit 0
+
+# Only a real JSON array is read: an object, or top-level keys that merely
+# look like "scripts.0.name", are not a manifest.
+[ "$(printf '%s\n' "$_sr_flat" | aionas_json_type scripts)" = a ] || exit 0
 
 _sr_seen=" "
 _sr_i=0

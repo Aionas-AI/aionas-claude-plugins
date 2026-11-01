@@ -25,8 +25,9 @@ aionas_sr_sha_ok() {
   printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[0-9a-f]{64}$'
 }
 
-# aionas_sr_sha256 FILE: print the file's sha256 (lowercase hex). The hash tool
-# is looked up at fixed system paths only, never on PATH: a project could put
+# aionas_sr_sha256 FILE: print the file's sha256 (lowercase hex, as every tool
+# below prints it; an uppercase digest fails aionas_sr_sha_ok, and the digest
+# never passes through a PATH tool). The hash tool is looked up at fixed system paths only, never on PATH: a project could put
 # its own sha256sum there and have it vouch for a file. Exit 1, printing
 # nothing, when there is none (the refresh then installs nothing).
 # AIONAS_SHA256_BIN replaces the lookup in tests, as AIONAS_CURL does for curl.
@@ -47,7 +48,6 @@ aionas_sr_sha256() {
     return 1
   fi
   _sr_h=${_sr_h%% *}
-  _sr_h=$(printf '%s' "$_sr_h" | tr 'A-F' 'a-f')
   aionas_sr_sha_ok "$_sr_h" || return 1
   printf '%s\n' "$_sr_h"
 }

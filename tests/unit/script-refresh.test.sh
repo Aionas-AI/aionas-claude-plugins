@@ -383,6 +383,54 @@ test_aio904_the_prev_copies_are_removed_by_name_on_a_later_day() {
   t_eq KEEP "$(cat "$(tools)/aionas-scan")"
 }
 
+# A manifest whose `scripts` is not an array is read as nothing, even when the
+# flattened paths look like array entries. The gateway serves sha-matching
+# bytes, so only the shape check can stop the write.
+test_aio904_a_scripts_member_that_is_not_an_array_installs_nothing() {
+  prepare
+  local n sha1 shape before
+  sha1=$(sha "$SR_SERVE/aionas-plan-usage.sh")
+  before=$(listing)
+  for shape in object dotted; do
+    case "$shape" in
+      object) printf '{"scripts":{"0":{"name":"aionas-plan-usage.sh","version":"V2","sha256":"%s"}}}\n' "$sha1" >"$SR_SERVE/manifest.json" ;;
+      dotted) printf '{"scripts.0.name":"aionas-plan-usage.sh","scripts.0.version":"V2","scripts.0.sha256":"%s"}\n' "$sha1" >"$SR_SERVE/manifest.json" ;;
+    esac
+    tick
+    out=$(hook); t_rc 0 hook
+    t_eq "" "$out" "quiet for shape $shape"
+    t_eq 0 "$(calls_to /api/aionas/onboarding/scripts/)" "no download for shape $shape"
+    t_eq "$before" "$(listing)" "tools listing unchanged for shape $shape"
+    for n in $NAMES; do
+      t_eq "$(body "$n" V1)" "$(cat "$(tools)/$n")" "$n unchanged for shape $shape"
+    done
+  done
+}
+
+test_aio904_a_manifest_over_64_kb_is_rejected_quietly() {
+  prepare
+  local pad; pad=$(head -c 70000 /dev/zero | tr '\0' 'a')
+  printf '{"release":"R","pad":"%s","scripts":[{"name":"aionas-plan-usage.sh","version":"V2","sha256":"%s"}]}\n' \
+    "$pad" "$(sha "$SR_SERVE/aionas-plan-usage.sh")" >"$SR_SERVE/manifest.json"
+  out=$(hook); t_rc 0 hook
+  t_eq "" "$out"
+  t_eq 0 "$(calls_to /api/aionas/onboarding/scripts/)" "no download"
+  t_eq "$(body aionas-plan-usage.sh V1)" "$(cat "$(tools)/aionas-plan-usage.sh")"
+}
+
+test_aio904_leftover_manifest_files_are_removed_by_exact_name_on_a_later_day() {
+  prepare; hook
+  local d; d=$(aionas_savings_dir)
+  printf 'x' >"$d/script-refresh.manifest.4242"     # a killed run's leftover
+  printf 'KEEP\n' >"$d/script-refresh.manifest.old" # not all digits
+  printf 'KEEP\n' >"$d/script-refresh.manifest"     # no suffix
+  export AIONAS_NOW=$((T0 + DAY))
+  hook
+  [ ! -e "$d/script-refresh.manifest.4242" ] || t_fail "digit-suffixed leftover was not removed"
+  t_eq KEEP "$(cat "$d/script-refresh.manifest.old")" "non-digit lookalike stays"
+  t_eq KEEP "$(cat "$d/script-refresh.manifest")" "unsuffixed lookalike stays"
+}
+
 test_aio904_the_prev_copy_survives_the_day_it_was_made_and_is_replaced_by_a_newer_update() {
   prepare; hook
   export AIONAS_NOW=$((T0 + DAY))

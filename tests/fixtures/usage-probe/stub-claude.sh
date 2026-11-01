@@ -7,6 +7,9 @@
 #   exit1              print it, exit 1
 #   hang               sleep 30 (TERM stops it)
 #   hang-ignore-term   ignore TERM and loop until KILLed
+#   grandchild         start a sleeping grandchild (pid in gpid), then hang
+#   flood              write 32 KB of x to stdout every 0.05 s (bytes so far in
+#                      $d/written), stop by itself after 8 MB
 # STUB_DELAY=<s> sleeps before printing. STUB_HOOK_LIST=<file> runs every script
 # named in the file (one path per line) with this process's environment first.
 log=${STUB_LOG:?}
@@ -49,6 +52,19 @@ fi
 [ -n "${STUB_DELAY:-}" ] && sleep "$STUB_DELAY"
 case "${STUB_MODE:-ok}" in
   hang) sleep 30 ;;
+  grandchild)
+    sleep 300 </dev/null >/dev/null 2>&1 &
+    echo $! >"$d/gpid"
+    sleep 30 ;;
+  flood)
+    chunk=$(head -c 32768 /dev/zero | tr '\0' x)
+    total=0
+    while [ "$total" -lt 8388608 ]; do
+      printf '%s' "$chunk"
+      total=$((total + 32768))
+      echo "$total" >"$d/written"
+      sleep 0.05
+    done ;;
   hang-ignore-term)
     trap '' TERM
     while :; do sleep 1; done ;;

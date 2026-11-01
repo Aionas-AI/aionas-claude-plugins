@@ -67,24 +67,50 @@ aionas_up_newest_first() {
     sort -t "$(printf '\t')" -k1,1nr -k2,2nr -k3,3nr -k4,4 | cut -f4
 }
 
+# aionas_up_desktop_list: the runnable Claude Desktop bundles, newest version
+# first, one per line: "V<TAB>path" when the build folder holds a .verified
+# file (Desktop's own mark), else "U<TAB>path". Anything with a symlink on the
+# way is left out: the version folder, the build folder (or <X.Y.Z> itself for
+# the second layout), claude.app, Contents, MacOS and the binary. A symlink
+# there could point the hourly run at a program the member never installed.
+aionas_up_desktop_list() {
+  _dl_base="$(aionas_home)/Library/Application Support/Claude/claude-code"
+  for _dl_v in $(ls -1 "$_dl_base" 2>/dev/null | grep -E '^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$' | aionas_up_newest_first); do
+    [ ! -L "$_dl_base/$_dl_v" ] && [ -d "$_dl_base/$_dl_v" ] || continue
+    for _dl_h in "$_dl_base/$_dl_v"/*; do
+      [ ! -L "$_dl_h" ] && [ -d "$_dl_h" ] || continue
+      _dl_c="$_dl_h/claude.app/Contents/MacOS/claude"
+      if [ ! -L "$_dl_h/claude.app" ] && [ ! -L "$_dl_h/claude.app/Contents" ] && [ ! -L "$_dl_h/claude.app/Contents/MacOS" ] &&
+        [ ! -L "$_dl_c" ] && aionas_up_exec_file "$_dl_c"; then
+        if [ -f "$_dl_h/.verified" ] && [ ! -L "$_dl_h/.verified" ]; then printf 'V\t%s\n' "$_dl_c"; else printf 'U\t%s\n' "$_dl_c"; fi
+      fi
+    done
+    _dl_c="$_dl_base/$_dl_v/claude"
+    if [ ! -L "$_dl_c" ] && aionas_up_exec_file "$_dl_c"; then
+      if [ -f "$_dl_base/$_dl_v/.verified" ] && [ ! -L "$_dl_base/$_dl_v/.verified" ]; then printf 'V\t%s\n' "$_dl_c"; else printf 'U\t%s\n' "$_dl_c"; fi
+    fi
+  done
+}
+
 # aionas_up_find_bin: print the claude binary to run, else exit 1.
 #   1. claude on PATH (an absolute, executable, regular file)
 #   2. macOS, Claude Desktop's bundled Claude Code, the newest version that has
 #      one: ~/Library/Application Support/Claude/claude-code/<X.Y.Z>/<12 hex>/claude.app/Contents/MacOS/claude
 #      (VERIFIED on a Mac with 2.1.304 and 2.1.308). The layout the issue text
-#      names, <X.Y.Z>/claude, is tried second (UNVERIFIED, never seen).
+#      names, <X.Y.Z>/claude, is tried second (UNVERIFIED, never seen). When
+#      any build has a .verified file (Desktop's own mark, in the build folder)
+#      the newest verified one wins over a newer unverified one. A path with a
+#      symlink on the way is never used (see aionas_up_desktop_list).
 #   3. the VS Code extension's bundled binary, newest version (UNVERIFIED path).
 # Windows Desktop: no path is cited anywhere, so only PATH is tried there.
 aionas_up_find_bin() {
   _fb=$(command -v claude 2>/dev/null)
   if aionas_up_exec_file "$_fb"; then printf '%s\n' "$_fb"; return 0; fi
   if [ "$(aionas_os)" = darwin ]; then
-    _fb_base="$(aionas_home)/Library/Application Support/Claude/claude-code"
-    for _fb_v in $(ls -1 "$_fb_base" 2>/dev/null | grep -E '^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$' | aionas_up_newest_first); do
-      for _fb_c in "$_fb_base/$_fb_v"/*/claude.app/Contents/MacOS/claude "$_fb_base/$_fb_v/claude"; do
-        if aionas_up_exec_file "$_fb_c"; then printf '%s\n' "$_fb_c"; return 0; fi
-      done
-    done
+    _fb_list=$(aionas_up_desktop_list)
+    _fb=$(printf '%s\n' "$_fb_list" | awk -F '\t' '$1 == "V" { print $2; exit }')
+    [ -n "$_fb" ] || _fb=$(printf '%s\n' "$_fb_list" | awk -F '\t' '$1 == "U" { print $2; exit }')
+    if [ -n "$_fb" ]; then printf '%s\n' "$_fb"; return 0; fi
   fi
   for _fb_r in $AIONAS_UP_VSCODE_ROOTS; do
     _fb_dir="$(aionas_home)/$_fb_r"
@@ -122,8 +148,12 @@ aionas_up_offset() {
 # aionas_up_resets ZONE WALL1 WALL2 NOW: print the reset instant as RFC 3339
 # UTC, or print nothing (exit 1). A wall time (seconds, as if UTC) becomes an
 # instant with the zone's offset, found by iterating and re-checked at the
-# result (daylight saving: a time that does not exist is dropped). Only an
-# instant after NOW and within 8 days is kept.
+# result (daylight saving: a time that does not exist is dropped). A wall time
+# that happens twice (clocks go back) is NOT resolved on purpose: the first guess
+# is the zone's offset at the wall time read as UTC, so zones west of UTC (New
+# York 1:30am on the fall-back day) get the first occurrence and zones east of
+# UTC (Europe/London 1:30am) get the second, up to one hour apart once a year.
+# Only an instant after NOW and within 8 days is kept.
 aionas_up_resets() {
   [ -n "$1" ] || return 1
   [ -f "$AIONAS_UP_ZONEINFO/$1" ] || return 1
@@ -162,18 +192,28 @@ aionas_up_unparsed() {
   return 0
 }
 
-# aionas_up_cleanup: stop the child (TERM, 1 s, KILL), remove this run's files
-# by name, release the lock. Safe to call twice.
-aionas_up_cleanup() {
-  if [ -n "$_up_pid" ]; then
-    if kill -0 "$_up_pid" 2>/dev/null; then
-      kill -TERM "$_up_pid" 2>/dev/null
-      sleep 1
-      if kill -0 "$_up_pid" 2>/dev/null; then kill -KILL "$_up_pid" 2>/dev/null; fi
-    fi
-    wait "$_up_pid" 2>/dev/null
-    _up_pid=""
+# aionas_up_stop_group: stop the child and everything it started. The child
+# runs in its own process group (set -m, see aionas_up_run), so TERM goes to the
+# whole group, then KILL after a 1 s grace. The plain-pid kill is the fallback
+# for a shell that cannot make groups (Git Bash).
+aionas_up_stop_group() {
+  [ -n "$_up_pid" ] || return 0
+  kill -TERM -- "-$_up_pid" 2>/dev/null
+  kill -TERM "$_up_pid" 2>/dev/null
+  sleep 1
+  if kill -0 -- "-$_up_pid" 2>/dev/null || kill -0 "$_up_pid" 2>/dev/null; then
+    kill -KILL -- "-$_up_pid" 2>/dev/null
+    kill -KILL "$_up_pid" 2>/dev/null
   fi
+  wait "$_up_pid" 2>/dev/null
+  _up_pid=""
+  return 0
+}
+
+# aionas_up_cleanup: stop the child group (TERM, 1 s, KILL), remove this run's
+# files by name, release the lock. Safe to call twice.
+aionas_up_cleanup() {
+  aionas_up_stop_group
   if [ -n "$_up_out" ]; then rm -f "$_up_out"; _up_out=""; fi
   if [ -n "$_up_body" ]; then rm -f "$_up_body"; _up_body=""; fi
   if [ -n "$_up_resp" ]; then rm -f "$_up_resp"; _up_resp=""; fi
@@ -192,9 +232,12 @@ aionas_up_run() {
   aionas_up_tap_fresh "$_r_now" && return 0
 
   # The Claude login file: an API key or no subscription has no plan figure
-  # (and /usage would print the cost view), so nothing is started for it.
+  # (and /usage would print the cost view), so nothing is started for it. A
+  # login file with no oauthAccount.accountUuid (or no login file) is an API-key
+  # or gateway-routed member: no child is started.
   _r_acct="" _r_org="" _r_orgname=""
   _r_cj="${CLAUDE_CONFIG_DIR:-$(aionas_home)}/.claude.json"
+  [ -f "$_r_cj" ] || return 0
   if [ -f "$_r_cj" ]; then
     _r_flat=$(aionas_json_flatten "$_r_cj" 2>/dev/null) || _r_flat=""
     _r_fields=$(printf '%s\n' "$_r_flat" | awk -F '\t' '
@@ -206,6 +249,7 @@ aionas_up_run() {
 $_r_fields
 EOF
     case "$_r_bt" in api | none) return 0 ;; esac
+    [ -n "$_r_acct" ] || return 0
     . "$AIONAS_LIB/claude-account.sh" 2>/dev/null || return 0
     _r_acct=$(_pr_uuid "$_r_acct")
     _r_org=$(_pr_uuid "$_r_org")
@@ -242,8 +286,13 @@ EOF
   # retried before the hour is over.
   printf '%s\n' "$_r_now" | aionas_write_atomic "$(aionas_savings_dir)/usage-probe.last" || return 0
 
+  # Job control makes the background child the leader of its own process group
+  # (pgid = its pid), so a timeout or an oversize result can stop every process
+  # it started, not just the first one.
+  set -m 2>/dev/null
   ( cd "$_r_pdir" && AIONAS_USAGE_PROBE=1 exec "$_r_bin" -p "/usage" --no-session-persistence --output-format json ) </dev/null >"$_up_out" 2>/dev/null &
   _up_pid=$!
+  set +m 2>/dev/null
 
   _r_limit=$AIONAS_UP_TIMEOUT
   case "${AIONAS_USAGE_PROBE_TIMEOUT:-}" in
@@ -252,12 +301,21 @@ EOF
   esac
   _r_t0=$(date +%s)
   while kill -0 "$_up_pid" 2>/dev/null; do
-    if [ $(($(date +%s) - _r_t0)) -ge "$_r_limit" ]; then
+    # Whole seconds: "more than the limit" means at least the limit has passed.
+    if [ $(($(date +%s) - _r_t0)) -gt "$_r_limit" ]; then
       # Too slow: stop it and send nothing; partial output is never parsed.
       aionas_up_cleanup
       return 0
     fi
-    sleep 0.5 2>/dev/null || sleep 1
+    # Too much output: stop it now, so a flooding child cannot fill the disk
+    # before the timeout. Counted like any other unreadable result.
+    _r_size=$(wc -c <"$_up_out" 2>/dev/null | tr -d ' ')
+    if aionas_is_uint "${_r_size:-x}" && [ "$_r_size" -gt "$AIONAS_UP_MAX_BYTES" ]; then
+      aionas_up_cleanup
+      aionas_up_unparsed
+      return 0
+    fi
+    sleep 0.2 2>/dev/null || sleep 1
   done
   wait "$_up_pid" 2>/dev/null
   _r_rc=$?

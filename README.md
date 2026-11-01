@@ -27,7 +27,7 @@ Without the one install the plugin does nothing: no method acts and the band sta
 
 The plugin takes effect from the next session. Releases are git tags (`aionas-savings-vX.Y.Z`); with auto-update on, Claude Code follows the marketplace.
 
-**Privacy.** Only numbers and names leave the computer. For a member who never opens the terminal UI, the plugin runs Claude Code's own `/usage` command once an hour (a local command, no model call) and sends only the weekly percent and its reset time; the text of the result, the time zone and prompts never leave. The hourly counters send a method, a counter name and a count. The policy sync only downloads. Prompts, model replies, tool output and command arguments are never sent.
+**Privacy.** Only numbers and names leave the computer. For a member who never opens the terminal UI, the plugin runs Claude Code's own `/usage` command once an hour (a local command, no model call) and sends only the weekly percent and its reset time; the text of the result, the time zone and prompts never leave. That hourly child `claude -p "/usage"` is Claude Code's own call to Anthropic, made with the member's own login: Aionas never reads the login token, and `security/egress-manifest.txt` cannot list that call because the plugin does not make it. The probe starts only when the Claude login file has an account id (a member on an API key or routed through the gateway has none, and nothing is started). The hourly counters send a method, a counter name and a count. The policy sync only downloads. Prompts, model replies, tool output and command arguments are never sent.
 
 ### Layout
 
@@ -49,7 +49,7 @@ tests/                                   make test
 | SessionStart | `daily-scan.sh` | async | AIO‑854 |
 | SessionStart | `plan-report.sh` | async | AIO‑888 |
 | SessionStart | `script-refresh.sh` | async | AIO‑904 |
-| SessionStart | `usage-probe.sh` | async, 45 s | AIO-892 |
+| SessionStart | `usage-probe.sh` | async, 45 s | AIO‑892 |
 | SessionStart | `effort-window.sh` | async | AIO‑859 |
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |

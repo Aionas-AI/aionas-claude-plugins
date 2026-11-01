@@ -320,6 +320,11 @@ test_resets_at_follows_daylight_saving_in_that_zone() {
   resets_case 2026-10-30T00:00:00Z 'Oct 31 at 12:00pm (America/New_York)' 2026-10-31T16:00:00Z
   resets_case 2026-03-07T00:00:00Z 'Mar 9 at 3:00am (America/New_York)' 2026-03-09T07:00:00Z
   resets_case 2026-03-07T00:00:00Z 'Mar 8 at 2:30am (America/New_York)' ""
+  # The hour that happens twice (clocks go back): which of the two instants is
+  # chosen depends on the side of UTC. West of it (New York) the first, east of
+  # it (London) the second. Pinned as the current behaviour, not as a rule.
+  resets_case 2026-10-30T00:00:00Z 'Nov 1 at 1:30am (America/New_York)' 2026-11-01T05:30:00Z
+  resets_case 2026-10-23T00:00:00Z 'Oct 25 at 1:30am (Europe/London)' 2026-10-25T01:30:00Z
 }
 
 test_the_computers_own_timezone_does_not_matter() {
@@ -466,6 +471,48 @@ test_desktop_skips_odd_names_and_versions_with_no_executable() {
   t_eq "$(desktop 2.1.308 a93ded4b1b47)" "$(cat "$STUB_LOG/run.1/argv0")"
 }
 
+test_desktop_rejects_a_symlinked_version_dir_or_binary_component() {
+  up_setup; rm -f "$STUB/claude"; as_mac
+  local base="$HOME/Library/Application Support/Claude/claude-code"
+  install_stub "$(desktop 2.1.308 a93ded4b1b47)"
+  # a newer version dir that is a symlink to a real tree holding a binary
+  install_stub "$T_ROOT/elsewhere/2.1.999/bbbbbbbbbbbb/claude.app/Contents/MacOS/claude"
+  ln -s "$T_ROOT/elsewhere/2.1.999" "$base/2.1.400"
+  # a newer one whose hex dir is a symlink
+  mkdir -p "$base/2.1.500"
+  install_stub "$T_ROOT/elsewhere2/cccccccccccc/claude.app/Contents/MacOS/claude"
+  ln -s "$T_ROOT/elsewhere2/cccccccccccc" "$base/2.1.500/cccccccccccc"
+  # a newer one whose claude.app is a symlink
+  install_stub "$T_ROOT/elsewhere3/claude.app/Contents/MacOS/claude"
+  mkdir -p "$base/2.1.600/dddddddddddd"
+  ln -s "$T_ROOT/elsewhere3/claude.app" "$base/2.1.600/dddddddddddd/claude.app"
+  # a newer one whose binary itself is a symlink
+  mkdir -p "$base/2.1.700/eeeeeeeeeeee/claude.app/Contents/MacOS"
+  ln -s "$STUB/uname" "$base/2.1.700/eeeeeeeeeeee/claude.app/Contents/MacOS/claude"
+  hook
+  t_eq 1 "$(runs)"
+  t_eq "$(desktop 2.1.308 a93ded4b1b47)" "$(cat "$STUB_LOG/run.1/argv0")" "only the real tree counts"
+}
+
+test_desktop_prefers_a_version_dir_with_a_verified_file() {
+  up_setup; rm -f "$STUB/claude"; as_mac
+  install_stub "$(desktop 2.1.100 aaaaaaaaaaaa)"
+  install_stub "$(desktop 2.1.308 a93ded4b1b47)"
+  : >"$(dirname "$(desktop 2.1.100 aaaaaaaaaaaa)")/../../../.verified"
+  hook
+  t_eq "$(desktop 2.1.100 aaaaaaaaaaaa)" "$(cat "$STUB_LOG/run.1/argv0")" "older but verified beats newer unverified"
+  # two verified: the newest of them
+  fresh_hour
+  : >"$(dirname "$(desktop 2.1.308 a93ded4b1b47)")/../../../.verified"
+  hook
+  t_eq "$(desktop 2.1.308 a93ded4b1b47)" "$(cat "$STUB_LOG/run.2/argv0")"
+  # none verified: the newest
+  fresh_hour
+  rm -f "$(dirname "$(desktop 2.1.100 aaaaaaaaaaaa)")/../../../.verified" "$(dirname "$(desktop 2.1.308 a93ded4b1b47)")/../../../.verified"
+  hook
+  t_eq "$(desktop 2.1.308 a93ded4b1b47)" "$(cat "$STUB_LOG/run.3/argv0")"
+}
+
 test_desktop_is_looked_up_on_macos_only() {
   up_setup; rm -f "$STUB/claude"; as_linux
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
@@ -519,14 +566,25 @@ test_an_api_key_login_is_not_probed() {
   hook; t_eq 1 "$(runs)"
 }
 
-test_without_a_login_file_it_still_probes_and_sends_no_account() {
+test_without_an_account_in_the_login_file_nothing_is_started() {
   up_setup
   rm -f "$HOME/.claude.json"
-  hook
-  t_eq 1 "$(t_calls)"
-  t_lacks "$(body)" account_uuid
-  t_lacks "$(body)" organization
-  t_contains "$(body)" '"windows":[{"kind":"weekly_all"'
+  hook; t_eq 0 $? "exit 0"
+  t_eq 0 "$(runs)" "no login file: no child"
+  t_eq 0 "$(t_calls)"
+  t_not test -f "$(stamp)"
+  # a login file with no oauthAccount (API key or gateway-routed member)
+  printf '{"userID":"SECRET-USER-ID","numStartups":3}' >"$HOME/.claude.json"
+  hook; t_eq 0 "$(runs)" "no oauthAccount: no child"
+  # an oauthAccount without accountUuid
+  printf '{"oauthAccount":{"billingType":"invoice","organizationUuid":"%s"}}' "$ORGUUID" >"$HOME/.claude.json"
+  hook; t_eq 0 "$(runs)" "no accountUuid: no child"
+  printf '{"oauthAccount":{"accountUuid":"","billingType":"invoice"}}' >"$HOME/.claude.json"
+  hook; t_eq 0 "$(runs)" "empty accountUuid: no child"
+  t_eq 0 "$(t_calls)"
+  t_eq 0 "$(counter)" "not a failed read"
+  claude_json invoice
+  hook; t_eq 1 "$(runs)" "with an account it probes"
 }
 
 test_account_and_organization_are_taken_like_the_plan_report() {
@@ -558,6 +616,32 @@ test_a_hung_child_is_stopped_and_nothing_is_sent() {
   t_eq "" "$(find "$(pdir)" -mindepth 1)"
   t_not test -d "$(aionas_savings_dir)/locks/usage-probe.lock"
   t_eq "$NOW0" "$(cat "$(stamp)")" "a hung start is not retried before the hour is over"
+}
+
+test_a_timeout_kills_the_whole_process_group() {
+  up_setup
+  export STUB_MODE=grandchild AIONAS_USAGE_PROBE_TIMEOUT=1
+  hook; t_eq 0 $? "exit 0"
+  local gp; gp=$(cat "$STUB_LOG/run.1/gpid")
+  if alive "$gp"; then kill -KILL "$gp" 2>/dev/null; t_fail "the grandchild survived the timeout"; fi
+  ! alive "$(cat "$STUB_LOG/run.1/pid")" || t_fail "the child survived"
+  t_eq 0 "$(t_calls)"
+}
+
+test_output_over_the_cap_stops_the_child_and_sends_nothing() {
+  up_setup
+  export STUB_MODE=flood AIONAS_USAGE_PROBE_TIMEOUT=5
+  local t0 t1
+  t0=$(date +%s)
+  hook; t_eq 0 $? "exit 0"
+  t1=$(date +%s)
+  local w; w=$(cat "$STUB_LOG/run.1/written")
+  [ "$w" -lt 1048576 ] 2>/dev/null || t_fail "the child wrote [$w] bytes before it was stopped"
+  t_ok test $((t1 - t0)) -le 4
+  t_eq 0 "$(t_calls)" "nothing is sent"
+  ! alive "$(cat "$STUB_LOG/run.1/pid")" || t_fail "the child survived"
+  t_eq "" "$(find "$(pdir)" -mindepth 1)"
+  t_not test -d "$(aionas_savings_dir)/locks/usage-probe.lock"
 }
 
 test_a_slow_child_within_the_timeout_still_counts() {

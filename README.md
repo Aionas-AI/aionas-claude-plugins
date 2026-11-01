@@ -48,6 +48,7 @@ tests/                                   make test
 | SessionStart | `policy-sync.sh` | async | AIO‑855 |
 | SessionStart | `daily-scan.sh` | async | AIO‑854 |
 | SessionStart | `plan-report.sh` | async | AIO‑888 |
+| SessionStart | `script-refresh.sh` | async | AIO‑904 |
 | SessionStart | `effort-window.sh` | async | AIO‑859 |
 | SessionStart | `unused-services.sh` | async | AIO‑861 |
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |

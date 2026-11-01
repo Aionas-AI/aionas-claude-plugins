@@ -27,3 +27,20 @@ aionas_http() {
   case "$_h_code" in 2??) return 0 ;; esac
   return 1
 }
+
+# aionas_http_public GET PATH OUT_FILE: call a PUBLIC route of the enrolled
+# gateway WITHOUT the enrollment alias (AIO-904: the script download is public,
+# and the alias must stay out of its access log). Same gateway check as
+# aionas_http (https, or http only for localhost / 127.0.0.1), same 3 s / 5 s
+# limits, and a 1 MB size cap. No -L: a redirect answers 3xx, never 200.
+# Prints the HTTP status ("000" when nothing came back); exits 0 only for 2xx.
+# Exits 3 without any network call when the computer has no valid gateway.
+aionas_http_public() {
+  _hp_gw=$(aionas_enroll_gateway) || { echo 000; return 3; }
+  _hp_code=$(${AIONAS_CURL:-curl} -sS --connect-timeout 3 --max-time 5 --retry 0 --max-filesize 1048576 \
+    -X "$1" -H 'Accept: */*' -o "$3" -w '%{http_code}' "$_hp_gw$2" 2>/dev/null)
+  case "$_hp_code" in [0-9][0-9][0-9]) ;; *) _hp_code=000 ;; esac
+  echo "$_hp_code"
+  case "$_hp_code" in 2??) return 0 ;; esac
+  return 1
+}

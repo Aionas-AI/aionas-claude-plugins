@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
     --data-binary) case "$2" in @*) cat "${2#@}" >"$d/body" ;; *) printf '%s' "$2" >"$d/body" ;; esac; shift ;;
     -o) out=$2; shift ;;
     -w) wfmt=$2; shift ;;
-    --connect-timeout | --max-time | --retry) shift ;;
+    --connect-timeout | --max-time | --retry | --max-filesize) shift ;;
     -*) ;;
     *) url=$1 ;;
   esac

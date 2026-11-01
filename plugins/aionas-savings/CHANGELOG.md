@@ -5,6 +5,7 @@ Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude
 ## Unreleased (0.5.0)
 
 - **Plan detection reads the member's own tier, knows Ultra, and names the Claude organization** (AIO‑899, AIO‑900, AIO‑901): the plan report uses `userRateLimitTier` (else the organization's) so a Team premium seat is `team_premium`; a tier containing `ultra` is `max_20x` (plan ids are unchanged); every sample also carries `organization_uuid` and a cleaned `organization_name` when Claude Code has them.
+- **The installed plan collector and status-line tap refresh themselves** (AIO‑904): once a UTC day, at session start, an enrolled computer asks the gateway for the current release of `aionas-plan-usage` and `aionas-statusline-tap` (`.sh` and `.ps1`) and, for a script that is already installed and differs, downloads it from the gateway's public route without sending the enrollment alias. It installs only after the sha256 matches (hash tool at a fixed system path, never `PATH`), a `.sh` starts with `#!`, and the copy is renamed over the old one atomically; the old copy stays one day as `<name>.prev`. Any failed check keeps the old script and tries again the next day. `settings.json` is never written.
 
 ## 0.4.1 (2026-11-01)
 

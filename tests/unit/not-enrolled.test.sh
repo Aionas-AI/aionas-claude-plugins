@@ -23,7 +23,7 @@ test_band_draws_nothing() {
 test_session_start_adds_nothing_and_sends_nothing() {
   t_unenroll
   local h
-  for h in policy-sync daily-scan plan-report effort-window unused-services unused-services-notice write-minimum; do
+  for h in policy-sync daily-scan plan-report script-refresh effort-window unused-services unused-services-notice write-minimum; do
     t_eq "" "$(start "$h")" "$h"
   done
   t_eq 0 "$(t_calls)"

@@ -72,5 +72,7 @@ http GET /enroll/v1/scripts/manifest
 http POST /cc-quota/v1/samples
 http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
+mod plugins/aionas-savings/hooks/mod.tsx: $.fs.exists
+mod plugins/aionas-savings/hooks/mod.tsx: $.fs.write
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run
 public GET /api/aionas/onboarding/scripts/

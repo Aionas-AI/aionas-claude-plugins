@@ -37,7 +37,7 @@
 // the context size from session.measure; it never calls $.http.fetch or
 // $.session.messages, nor reads ~/.claude/projects or the alias credential.
 import type { EngineInterface, Register } from 'claude-code'
-import { drawBand, isCounting, parseBand, routeOf } from './band.tsx'
+import { NO_GIT_BASH, drawBand, drawNotice, isCounting, parseBand, routeOf } from './band.tsx'
 import type { Action, Facts } from './band.tsx'
 
 type Grant = 'high' | 'xhigh' | 'max' | 'free'
@@ -79,12 +79,39 @@ export const launchEffort = (args: string): string | undefined =>
 // The /effort arguments that name a level (Claude Code 2.1.299).
 const EFFORT_ARGS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto']
 
+// Git Bash on Windows (AIO-905). Claude Code finds Git Bash for its hooks
+// without setting CLAUDE_CODE_GIT_BASH_PATH, so inside the desktop app the
+// bare word "bash" from PATH is missing, or is System32's WSL launcher, and
+// every script the mod runs would fail. Resolved here the way Claude Code
+// does, never from PATH: the variable when it names a file, else the standard
+// install folders. Windows' own bash.exe (WSL, the Store alias) is never used.
+export const isWslLauncher = (path: string): boolean =>
+  /[\\/](?:windows[\\/](?:system32|sysnative|syswow64)|windowsapps)[\\/]bash\.exe$/i.test(path)
+
+const trimEnd = (dir: string): string => dir.replace(/[\\/]+$/, '')
+
+// The standard places for Git for Windows' bash.exe, in order.
+export const gitBashCandidates = (dirs: { programFiles?: string; programFilesX86?: string; localAppData?: string }): string[] => {
+  const out: string[] = []
+  const add = (base: string | undefined, rest: string): void => {
+    if (base !== undefined && base.trim() !== '') out.push(`${trimEnd(base)}${rest}`)
+  }
+  add(dirs.programFiles ?? 'C:\\Program Files', '\\Git\\bin\\bash.exe')
+  add(dirs.programFilesX86, '\\Git\\bin\\bash.exe')
+  add(dirs.localAppData, '\\Programs\\Git\\bin\\bash.exe')
+  return out
+}
+
 // The session's state. Module variables: a reload (a new module) starts them
 // over, and session.start (which a reload fires again) reads them back from
 // the scripts, which keep the grant pinned per session on disk.
 const st = {
   sid: '',
   bash: 'bash',
+  // No Git Bash on this Windows computer: nothing can run (AIO-905).
+  isBashMissing: false,
+  isEnrolled: false,
+  resolving: undefined as Promise<void> | undefined,
   grant: Promise.resolve<Grant>('high'),
   chosen: undefined as Level | undefined,
   // The level the band shows: the last main-loop request's, else the level
@@ -121,8 +148,61 @@ async function sessionId($: EngineInterface): Promise<string> {
   return st.sid
 }
 
+const isSet = (v: string | undefined): v is string => v !== undefined && v.trim() !== ''
+
+async function exists($: EngineInterface, path: string): Promise<boolean> {
+  try {
+    return await $.fs.exists(path)
+  } catch {
+    return false
+  }
+}
+
+// Finds the bash the scripts run with, once per session (and once for a
+// module that reloaded before its session.start). macOS and Linux keep the
+// variable or the bare word as before. On Windows the path found, or "not
+// found", goes to ~/.aionas/agent/state/git-bash-path: the next support case
+// is one file read. Nothing else is written, and no script is needed for it.
+async function resolveBash($: EngineInterface): Promise<void> {
+  const set = await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT' || (await $.env.get('SystemRoot')) !== undefined
+  st.isBashMissing = false
+  if (!isWindows) {
+    st.bash = isSet(set) ? set : 'bash'
+    return
+  }
+  let found: string | undefined
+  if (isSet(set) && !isWslLauncher(set) && (await exists($, set))) found = set
+  if (found === undefined) {
+    const dirs = {
+      programFiles: await $.env.get('ProgramFiles'),
+      programFilesX86: await $.env.get('ProgramFiles(x86)'),
+      localAppData: await $.env.get('LOCALAPPDATA'),
+    }
+    for (const c of gitBashCandidates(dirs)) {
+      if (await exists($, c)) {
+        found = c
+        break
+      }
+    }
+  }
+  st.bash = found ?? ''
+  st.isBashMissing = found === undefined
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  const dir = (await $.env.get('AIONAS_AGENT_DIR')) ?? (home === undefined ? undefined : `${trimEnd(home)}/.aionas/agent`)
+  if (dir === undefined) return
+  const root = dir.replace(/\\/g, '/')
+  // Only a computer the one install enrolled hears about it (an existence
+  // check: the alias itself is never read).
+  st.isEnrolled = st.isBashMissing && (await exists($, `${root}/credential`))
+  await $.fs.write(`${root}/state/git-bash-path`, `${found ?? 'not found'}\n`).catch(() => undefined)
+}
+
 async function run($: EngineInterface, argv: string[]): Promise<Ran> {
   await sessionId($)
+  if (st.resolving === undefined) st.resolving = resolveBash($).catch(() => undefined)
+  await st.resolving
+  if (st.isBashMissing) return { code: 127, out: '' }
   try {
     const r = await $.process.run([st.bash, ...argv], { timeoutMs: 15000, env: { AIONAS_SESSION_ID: st.sid } })
     return { code: r.exitCode, out: r.stdout.trim() }
@@ -338,8 +418,11 @@ export const register: Register = on => {
       argumentHint: '[max] [reason]',
     })
     st.sid = await $.session.id()
-    // Windows: Claude Code's own Git Bash, never whatever "bash" PATH finds (WSL).
-    st.bash = (await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')) ?? 'bash'
+    // Windows: Git Bash found the way Claude Code finds it, never whatever
+    // "bash" PATH finds (WSL). Where there is none, say so once (AIO-905).
+    st.resolving = resolveBash($).catch(() => undefined)
+    await st.resolving
+    if (st.isBashMissing && st.isEnrolled) $.ui.toast(`${NO_GIT_BASH}.`)
     st.baseExtra = await $.env.get('CLAUDE_CODE_EXTRA_BODY')
     st.baseUrl = await $.env.get('ANTHROPIC_BASE_URL')
     await subagentBase($)
@@ -475,6 +558,7 @@ export const register: Register = on => {
     st.isDrawn = true
     if (st.facts === undefined) await st.listed
     const facts = st.facts
+    if (facts === undefined && st.isBashMissing && st.isEnrolled) return drawNotice($, e, NO_GIT_BASH)
     if (facts === undefined || facts.methods.length === 0) return next(e)
     return drawBand(
       $,

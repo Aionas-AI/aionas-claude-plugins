@@ -72,6 +72,26 @@ test_fixture_41_sends_exactly_one_usage_cmd_sample() {
   t_eq "{\"tool\":\"claude_code\",\"source\":\"usage_cmd\",\"observed_at\":\"2026-11-01T00:00:00Z\",\"account_uuid\":\"$UUID\",\"organization_uuid\":\"$ORGUUID\",\"organization_name\":\"Example Org\",\"windows\":[{\"kind\":\"weekly_all\",\"window_minutes\":10080,\"used_percent\":41,\"resets_at\":\"2026-11-03T03:59:00Z\"}]}" "$(body)"
 }
 
+test_real_2_1_311_capture_sends_only_the_all_models_weekly_line() {
+  up_setup
+  export STUB_OUTPUT="$FIX/usage-2.1.311-real-capture.json"
+  hook
+  t_eq 1 "$(t_calls)" "one sample"
+  # (a) the all-models line: 47, and the reset the 41% fixture logic gives for the same text
+  t_eq "{\"tool\":\"claude_code\",\"source\":\"usage_cmd\",\"observed_at\":\"2026-11-01T00:00:00Z\",\"account_uuid\":\"$UUID\",\"organization_uuid\":\"$ORGUUID\",\"organization_name\":\"Example Org\",\"windows\":[{\"kind\":\"weekly_all\",\"window_minutes\":10080,\"used_percent\":47,\"resets_at\":\"2026-11-03T03:59:00Z\"}]}" "$(body)"
+  # (b) no text of the result leaves the computer
+  local b w; b=$(body)
+  for w in "contributing" "requests" "subagents" "example-repo" "example-skill" "example-mcp" "Fable" "%  " "subscription" "sessions"; do
+    t_lacks "$b" "$w"
+  done
+  # (c) a percentage of the contributing section is never the weekly figure
+  local p
+  for p in 83 72 71 5 4 2 1; do
+    t_lacks "$b" "\"used_percent\":$p,"
+    t_lacks "$b" "\"used_percent\":$p}"
+  done
+}
+
 test_nothing_but_the_numbers_leaves_the_computer() {
   up_setup
   hook

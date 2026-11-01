@@ -110,6 +110,7 @@ function world(on: On, grant: string = 'high'): World {
     const last = e.argv.slice(-2)
     let stdout = ''
     if (a.includes('effort-window.sh grant')) stdout = grant
+    else if (a.includes('--subagent-start')) stdout = ''
     else if (a.includes('--subagent-model')) {
       const base = last[1] as string
       stdout = base !== '' ? base : w.methods.subagent_sonnet?.active === 1 ? 'sonnet' : '-'
@@ -996,6 +997,21 @@ describe('subagent_sonnet', () => {
     w.env.set('CLAUDE_CODE_SUBAGENT_MODEL', 'opus')
     await spawn()
     expect(models).toEqual(['sonnet', undefined, 'sonnet', 'opus'])
+  })
+
+  test('each sub-agent start runs the counting script exactly once, before the model decision, whatever the method state', async ($, on) => {
+    const w = world(on, 'high')
+    on('agent.spawn', () => ({ model: 'parent' }))
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    const calls = () => w.argv.map(a => a.join(' ')).filter(a => a.includes('--subagent-start') || a.includes('--subagent-model'))
+    await $.agent.spawn({ prompt: 'one' })
+    expect(calls().map(a => (a.includes('--subagent-start') ? 'count' : 'model'))).toEqual(['count', 'model'])
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
+    await $.agent.spawn({ prompt: 'two' })
+    expect(calls().filter(a => a.includes('--subagent-start'))).toHaveLength(2)
+    expect(calls().filter(a => a.includes('--subagent-model'))).toHaveLength(2)
+    // The count is the script's decision: the mod passes no method state and no counter name.
+    for (const a of w.argv.filter(x => x.join(' ').includes('--subagent-start'))) expect(a.slice(-1)).toEqual(['--subagent-start'])
   })
 
   test('a sub-agent started before session start saves the person\'s own value first and keeps it', async ($, on) => {

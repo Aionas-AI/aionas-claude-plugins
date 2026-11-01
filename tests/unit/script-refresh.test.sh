@@ -183,18 +183,29 @@ test_aio904_names_outside_the_four_or_not_installed_write_nothing() {
   prepare
   rm -f "$(tools)/aionas-statusline-tap.ps1"               # not installed
   printf 'KEEP\n' >"$(tools)/aionas-scan"                  # installed, but not one of the four
+  # Files that a hostile name would resolve to if the name were used as a path.
+  mkdir -p "$HOME/.aionas/savings"
+  printf 'KEEP\n' >"$HOME/.aionas/agent/x"                 # tools/../x
+  printf 'KEEP\n' >"$HOME/.aionas/savings/pwn"             # tools/../../savings/pwn
   local before; before=$(listing)
-  mkdir -p "$SR_SERVE/x"
-  local n
+  local n b c0
   for n in evil.sh ../x ../../savings/pwn aionas-scan 'aionas-plan-usage.sh/../evil' aionas-statusline-tap.ps1 ''; do
-    body evil.sh V2 >"$SR_SERVE/evil.sh"
-    printf '{"release":"R","scripts":[{"name":"%s","version":"V2","sha256":"%s"}]}\n' "$n" "$(sha "$SR_SERVE/evil.sh")" >"$SR_SERVE/manifest.json"
+    # The gateway serves valid bytes for the last path segment of the URL the
+    # hook would build, with the matching sha and version: only the name check
+    # (not a 404, a hash mismatch or a stamp mismatch) can stop the write.
+    b=${n##*/}; [ -n "$b" ] || b=aionas-scan
+    body evil.sh V2 >"$SR_SERVE/$b"
+    printf '{"release":"R","scripts":[{"name":"%s","version":"V2","sha256":"%s"}]}\n' "$n" "$(sha "$SR_SERVE/$b")" >"$SR_SERVE/manifest.json"
     tick
+    c0=$(t_calls)
     hook
     t_eq "$before" "$(listing)" "tools listing identical for name [$n]"
+    t_eq $((c0 + 1)) "$(t_calls)" "only the manifest was requested for name [$n]: no download is attempted"
+    t_eq KEEP "$(cat "$(tools)/aionas-scan")" "aionas-scan untouched for name [$n]"
+    t_eq KEEP "$(cat "$HOME/.aionas/agent/x")" "tools/../x untouched for name [$n]"
+    t_eq KEEP "$(cat "$HOME/.aionas/savings/pwn")" "savings/pwn untouched for name [$n]"
   done
-  t_eq KEEP "$(cat "$(tools)/aionas-scan")"
-  [ ! -e "$HOME/.aionas/agent/x" ] && [ ! -e "$HOME/.aionas/x" ] && [ ! -e "$(aionas_savings_dir)/pwn" ] || t_fail "something was written outside tools"
+  [ ! -e "$HOME/.aionas/x" ] || t_fail "something was written outside tools"
 }
 
 test_aio904_an_installed_name_is_replaced_even_when_the_manifest_lists_others() {

@@ -1027,3 +1027,146 @@ describe('subagent_sonnet', () => {
     expect(models).toEqual(['opus'])
   })
 })
+
+// AIO-905: the band never showed in Claude Desktop on Windows, because the
+// mod ran its scripts with the bare word "bash" from PATH. Paths below are
+// fixtures; the user folder is C:\Users\<user>.
+describe('Git Bash on Windows (AIO-905)', () => {
+  const PF = 'C:\\Program Files\\Git\\bin\\bash.exe'
+  const PF86 = 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'
+  const LOCAL = 'C:\\Users\\<user>\\AppData\\Local\\Programs\\Git\\bin\\bash.exe'
+  const SYSTEM32 = 'C:\\Windows\\System32\\bash.exe'
+  const CREDENTIAL = 'C:/Users/<user>/.aionas/agent/credential'
+  const DEBUG_FILE = 'C:/Users/<user>/.aionas/agent/state/git-bash-path'
+  const NOT_FOUND = 'Aionas: Git Bash not found on this computer; savings methods are off'
+
+  // A Windows desktop: the files that exist, the environment Desktop passes
+  // (no CLAUDE_CODE_GIT_BASH_PATH), and every file the mod writes.
+  function windows(on: On, files: string[], vars: Record<string, string> = {}): { w: World; written: Map<string, string>; checked: string[] } {
+    const w = world(on)
+    const written = new Map<string, string>()
+    const checked: string[] = []
+    const env: Record<string, string> = {
+      OS: 'Windows_NT',
+      SystemRoot: 'C:\\Windows',
+      ProgramFiles: 'C:\\Program Files',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      LOCALAPPDATA: 'C:\\Users\\<user>\\AppData\\Local',
+      USERPROFILE: 'C:\\Users\\<user>',
+      ...vars,
+    }
+    for (const [k, v] of Object.entries(env)) w.env.set(k, v)
+    on('fs.exists', ($, e) => {
+      checked.push(e.path)
+      return { value: files.includes(e.path) }
+    })
+    on('fs.write', ($, e) => {
+      written.set(e.path, e.text)
+      return { value: undefined }
+    })
+    return { w, written, checked }
+  }
+
+  const scripts = (w: World): string[] => w.argv.map(a => a[0] as string)
+
+  test('no CLAUDE_CODE_GIT_BASH_PATH and Git under Program Files: every script runs with that exact path, and the band draws', async ($, on) => {
+    const { w, written } = windows(on, [PF])
+    await start($)
+    expect(w.argv.length).toBeGreaterThan(0)
+    expect(new Set(scripts(w))).toEqual(new Set([PF]))
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi/ })).toBeDefined()
+    expect(await ui.find({ text: NOT_FOUND })).toBeUndefined()
+    await ui.unmount()
+    // The one local debug file: the path, nothing else.
+    expect(written.get(DEBUG_FILE)).toBe(`${PF}\n`)
+    expect([...written.keys()]).toEqual([DEBUG_FILE])
+  })
+
+  test('CLAUDE_CODE_GIT_BASH_PATH set to a file that exists wins over the standard folders', async ($, on) => {
+    const own = 'D:\\Tools\\Git\\bin\\bash.exe'
+    const { w, written } = windows(on, [own, PF], { CLAUDE_CODE_GIT_BASH_PATH: own })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([own]))
+    expect(written.get(DEBUG_FILE)).toBe(`${own}\n`)
+  })
+
+  test('CLAUDE_CODE_GIT_BASH_PATH set to a file that is not there falls back to the standard folders', async ($, on) => {
+    const { w } = windows(on, [PF], { CLAUDE_CODE_GIT_BASH_PATH: 'D:\\Gone\\bash.exe' })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([PF]))
+  })
+
+  test('the standard folders are tried in order: Program Files, Program Files (x86), then the per-user install', async ($, on) => {
+    const a = windows(on, [PF86, LOCAL])
+    await start($)
+    expect(new Set(scripts(a.w))).toEqual(new Set([PF86]))
+  })
+
+  test('only the per-user install present: it is used', async ($, on) => {
+    const { w } = windows(on, [LOCAL])
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([LOCAL]))
+  })
+
+  test('Windows\' own bash.exe (the WSL launcher) is never used, not even when the variable names it', async ($, on) => {
+    const { w, checked } = windows(on, [SYSTEM32, 'C:\\Windows\\sysnative\\bash.exe'], { CLAUDE_CODE_GIT_BASH_PATH: SYSTEM32 })
+    await start($)
+    expect(w.argv).toEqual([])
+    // never even asked for: the launcher is rejected before any lookup
+    expect(checked).not.toContain(SYSTEM32)
+  })
+
+  test('only System32 bash present, enrolled: no script runs, the band shows one plain line, the first message says the same', async ($, on) => {
+    const { w, written } = windows(on, [SYSTEM32, CREDENTIAL])
+    await start($)
+    expect(w.argv).toEqual([])
+    expect(w.toasts).toEqual([`${NOT_FOUND}.`])
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ type: 'Text', text: NOT_FOUND })).toBeDefined()
+      expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
+      await ui.unmount()
+    }
+    expect(w.argv).toEqual([])
+    expect(written.get(DEBUG_FILE)).toBe('not found\n')
+    // A press or a command fails soft, still without a process.
+    const r = await $.command.run({ command: 'aionas-bypass', args: 'output_trim' } as never)
+    expect(r.text).toContain('could not run')
+    expect(w.argv).toEqual([])
+  })
+
+  test('no Git Bash on a computer the one install never enrolled: the band stays silent (engine band), no message', async ($, on) => {
+    const { w } = windows(on, [])
+    await start($)
+    expect(w.toasts).toEqual([])
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await ui.find({ text: /Git Bash/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'engine band' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('macOS and Linux are unchanged: the bare word or the variable, no file lookup, no debug file', async ($, on) => {
+    const w = world(on)
+    const touched: string[] = []
+    on('fs.exists', ($, e) => {
+      touched.push(e.path)
+      return { value: false }
+    })
+    on('fs.write', ($, e) => {
+      touched.push(e.path)
+      return { value: undefined }
+    })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set(['bash']))
+    expect(touched).toEqual([])
+    expect(w.toasts).toEqual([])
+  })
+
+  test('macOS and Linux with the variable set: its value, as before', async ($, on) => {
+    const w = world(on)
+    w.env.set('CLAUDE_CODE_GIT_BASH_PATH', '/opt/homebrew/bin/bash')
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set(['/opt/homebrew/bin/bash']))
+  })
+})

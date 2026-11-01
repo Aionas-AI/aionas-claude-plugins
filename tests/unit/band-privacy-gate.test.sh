@@ -9,7 +9,7 @@
 . "$(dirname "$0")/../lib/harness.sh"
 
 ALLOWED_CALLS='$.command.register $.command.run $.session.id $.env.get $.env.set $.process.run $.clock.every $.ui.resolve $.ui.invalidate $.ui.toast'
-ALLOWED_ENV='CLAUDE_CODE_GIT_BASH_PATH CLAUDE_CODE_EXTRA_BODY ANTHROPIC_BASE_URL'
+ALLOWED_ENV='CLAUDE_CODE_GIT_BASH_PATH CLAUDE_CODE_EXTRA_BODY ANTHROPIC_BASE_URL CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL AIONAS_SUBAGENT_MODEL_BASE OS ProgramFiles ProgramFiles(x86) LOCALAPPDATA'
 
 # gate REPORT_JSON: exit 0 when the report's module calls and env reads are
 # within the allowed sets; prints each offender.

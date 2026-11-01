@@ -282,6 +282,8 @@ test_only_a_successful_usage_local_command_is_sent() {
   check_nothing "keys must be top level"
   usage_out ''
   check_nothing "an empty result has nothing to keep"
+  printf '{"is_error":false,"local_command":"usage","result":"a\001b"}' >"$T_ROOT/ctl"; export STUB_OUTPUT=$T_ROOT/ctl
+  check_nothing "a raw control character is not valid JSON text"
   usage_out 'Current week (all models): 41% used'
   export STUB_MODE=exit1
   check_nothing "the child failed"
@@ -622,6 +624,7 @@ test_output_over_the_cap_stops_the_child_and_sends_nothing() {
   [ "$w" -lt 1048576 ] 2>/dev/null || t_fail "the child wrote [$w] bytes before it was stopped"
   t_ok test $((t1 - t0)) -le 4
   t_eq 0 "$(t_calls)" "nothing is sent"
+  t_eq 1 "$(counter)" "counted as too large"
   ! alive "$(cat "$STUB_LOG/run.1/pid")" || t_fail "the child survived"
   t_eq "" "$(find "$(pdir)" -mindepth 1)"
   t_not test -d "$(aionas_savings_dir)/locks/usage-probe.lock"

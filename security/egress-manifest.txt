@@ -48,7 +48,6 @@ file plugins/aionas-savings/lib/time.awk
 file plugins/aionas-savings/lib/unused-json.awk
 file plugins/aionas-savings/lib/unused-usage.awk
 file plugins/aionas-savings/lib/unused.sh
-file plugins/aionas-savings/lib/usage-probe.awk
 file plugins/aionas-savings/lib/usage-probe.sh
 file plugins/aionas-savings/rules/guard-store.tsv
 file plugins/aionas-savings/tsconfig.json

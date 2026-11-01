@@ -12,3 +12,12 @@ How a change reaches customer computers:
 - What the plugin runs and sends is listed in `security/egress-manifest.txt`;
   CI fails when the code and that list disagree.
 - Release tags `aionas-savings-v*` cannot be moved or deleted.
+
+What leaves the computer, beyond numbers and names: once an hour, on a
+computer where Claude Code runs outside the terminal UI, the plugin sends the
+full text of Claude Code's own `/usage` result (at most 32 KiB) to the
+organization's own gateway, by the owner's ruling, so the gateway can read the
+weekly figure and keep the text when it cannot. Besides the usage lines, that
+text has Claude Code's "What's contributing" section: local folder names,
+skill, sub-agent and MCP names, and request counts. Prompts and model replies
+never leave. The plugin does not parse the text and never reads a login token.

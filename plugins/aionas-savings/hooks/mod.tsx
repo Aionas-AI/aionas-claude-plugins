@@ -110,7 +110,6 @@ const st = {
   bash: 'bash',
   // No Git Bash on this Windows computer: nothing can run (AIO-905).
   isBashMissing: false,
-  isEnrolled: false,
   resolving: undefined as Promise<void> | undefined,
   grant: Promise.resolve<Grant>('high'),
   chosen: undefined as Level | undefined,
@@ -150,29 +149,34 @@ async function sessionId($: EngineInterface): Promise<string> {
 
 const isSet = (v: string | undefined): v is string => v !== undefined && v.trim() !== ''
 
-async function exists($: EngineInterface, path: string): Promise<boolean> {
+// Whether this bash starts: the file is there and runs `-c true`. The mod
+// reads no file itself (privacy gate), so this is how it checks a path.
+async function works($: EngineInterface, bash: string): Promise<boolean> {
   try {
-    return await $.fs.exists(path)
+    return (await $.process.run([bash, '-c', 'true'], { timeoutMs: 5000 })).exitCode === 0
   } catch {
     return false
   }
 }
 
+// Kept for support: the Git Bash path of this session, nothing else, in
+// ~/.aionas/agent/state/git-bash-path (written by the bash it names, the path
+// passed as an argument, never parsed by the shell).
+const RECORD_BASH =
+  'd=${AIONAS_AGENT_DIR:-${HOME:-$USERPROFILE}/.aionas/agent}/state; (umask 077; mkdir -p "$d" && printf "%s\\n" "$1" >"$d/git-bash-path")'
+
 // Finds the bash the scripts run with, once per session (and once for a
 // module that reloaded before its session.start). macOS and Linux keep the
-// variable or the bare word as before. On Windows the path found, or "not
-// found", goes to ~/.aionas/agent/state/git-bash-path: the next support case
-// is one file read. Nothing else is written, and no script is needed for it.
+// variable or the bare word as before.
 async function resolveBash($: EngineInterface): Promise<void> {
   const set = await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')
-  const isWindows = (await $.env.get('OS')) === 'Windows_NT' || (await $.env.get('SystemRoot')) !== undefined
   st.isBashMissing = false
-  if (!isWindows) {
+  if ((await $.env.get('OS')) !== 'Windows_NT') {
     st.bash = isSet(set) ? set : 'bash'
     return
   }
   let found: string | undefined
-  if (isSet(set) && !isWslLauncher(set) && (await exists($, set))) found = set
+  if (isSet(set) && !isWslLauncher(set) && (await works($, set))) found = set
   if (found === undefined) {
     const dirs = {
       programFiles: await $.env.get('ProgramFiles'),
@@ -180,7 +184,7 @@ async function resolveBash($: EngineInterface): Promise<void> {
       localAppData: await $.env.get('LOCALAPPDATA'),
     }
     for (const c of gitBashCandidates(dirs)) {
-      if (await exists($, c)) {
+      if (await works($, c)) {
         found = c
         break
       }
@@ -188,14 +192,7 @@ async function resolveBash($: EngineInterface): Promise<void> {
   }
   st.bash = found ?? ''
   st.isBashMissing = found === undefined
-  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
-  const dir = (await $.env.get('AIONAS_AGENT_DIR')) ?? (home === undefined ? undefined : `${trimEnd(home)}/.aionas/agent`)
-  if (dir === undefined) return
-  const root = dir.replace(/\\/g, '/')
-  // Only a computer the one install enrolled hears about it (an existence
-  // check: the alias itself is never read).
-  st.isEnrolled = st.isBashMissing && (await exists($, `${root}/credential`))
-  await $.fs.write(`${root}/state/git-bash-path`, `${found ?? 'not found'}\n`).catch(() => undefined)
+  if (found !== undefined) await $.process.run([found, '-c', RECORD_BASH, '_', found], { timeoutMs: 5000 }).catch(() => undefined)
 }
 
 async function run($: EngineInterface, argv: string[]): Promise<Ran> {
@@ -422,7 +419,7 @@ export const register: Register = on => {
     // "bash" PATH finds (WSL). Where there is none, say so once (AIO-905).
     st.resolving = resolveBash($).catch(() => undefined)
     await st.resolving
-    if (st.isBashMissing && st.isEnrolled) $.ui.toast(`${NO_GIT_BASH}.`)
+    if (st.isBashMissing) $.ui.toast(`${NO_GIT_BASH}.`)
     st.baseExtra = await $.env.get('CLAUDE_CODE_EXTRA_BODY')
     st.baseUrl = await $.env.get('ANTHROPIC_BASE_URL')
     await subagentBase($)
@@ -558,7 +555,7 @@ export const register: Register = on => {
     st.isDrawn = true
     if (st.facts === undefined) await st.listed
     const facts = st.facts
-    if (facts === undefined && st.isBashMissing && st.isEnrolled) return drawNotice($, e, NO_GIT_BASH)
+    if (facts === undefined && st.isBashMissing) return drawNotice($, e, NO_GIT_BASH)
     if (facts === undefined || facts.methods.length === 0) return next(e)
     return drawBand(
       $,

@@ -44,6 +44,9 @@ type World = {
   bandReads: () => number
   clock: MockClock
   toasts: string[]
+  // Windows only: the bash.exe paths that start (a `-c true` exits 0 there), and the paths recorded for support.
+  files: string[]
+  recorded: string[]
 }
 
 const ME = ['me', 'Noa Levi', 'Acme', 'member', 'Omer Katz', 'mbp-noa'].join('\t')
@@ -89,6 +92,8 @@ function world(on: On, grant: string = 'high'): World {
     bandReads: () => reads,
     clock: mock.clock(on, { now: T0 * 1000 }),
     toasts: [],
+    files: [],
+    recorded: [],
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-test-1' }))
@@ -109,7 +114,10 @@ function world(on: On, grant: string = 'high'): World {
     const a = e.argv.join(' ')
     const last = e.argv.slice(-2)
     let stdout = ''
-    if (a.includes('effort-window.sh grant')) stdout = grant
+    let exitCode = 0
+    if (e.argv[1] === '-c' && e.argv[2] === 'true') exitCode = w.files.includes(e.argv[0] as string) ? 0 : 127
+    else if (a.includes('git-bash-path')) w.recorded.push(last[1] as string)
+    else if (a.includes('effort-window.sh grant')) stdout = grant
     else if (a.includes('--subagent-start')) stdout = ''
     else if (a.includes('--subagent-model')) {
       const base = last[1] as string
@@ -142,7 +150,7 @@ function world(on: On, grant: string = 'high'): World {
       w.window = `window\txhigh\t${w.now + 600}\thigh`
       stdout = 'Higher effort is allowed for 10 minutes: sessions you open now start at their usual level, and you may raise them to xhigh (Extra) or max with /effort.'
     }
-    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('env.set', ($, e) => {
     // The effort tests count only the effort variables (subagent_sonnet's are
@@ -1036,91 +1044,84 @@ describe('Git Bash on Windows (AIO-905)', () => {
   const PF86 = 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'
   const LOCAL = 'C:\\Users\\<user>\\AppData\\Local\\Programs\\Git\\bin\\bash.exe'
   const SYSTEM32 = 'C:\\Windows\\System32\\bash.exe'
-  const CREDENTIAL = 'C:/Users/<user>/.aionas/agent/credential'
-  const DEBUG_FILE = 'C:/Users/<user>/.aionas/agent/state/git-bash-path'
   const NOT_FOUND = 'Aionas: Git Bash not found on this computer; savings methods are off'
 
-  // A Windows desktop: the files that exist, the environment Desktop passes
-  // (no CLAUDE_CODE_GIT_BASH_PATH), and every file the mod writes.
-  function windows(on: On, files: string[], vars: Record<string, string> = {}): { w: World; written: Map<string, string>; checked: string[] } {
+  // A Windows desktop: the bash.exe files that start and the environment
+  // Desktop passes (no CLAUDE_CODE_GIT_BASH_PATH).
+  function windows(on: On, files: string[], vars: Record<string, string> = {}): World {
     const w = world(on)
-    const written = new Map<string, string>()
-    const checked: string[] = []
+    w.files = files
     const env: Record<string, string> = {
       OS: 'Windows_NT',
-      SystemRoot: 'C:\\Windows',
       ProgramFiles: 'C:\\Program Files',
       'ProgramFiles(x86)': 'C:\\Program Files (x86)',
       LOCALAPPDATA: 'C:\\Users\\<user>\\AppData\\Local',
-      USERPROFILE: 'C:\\Users\\<user>',
       ...vars,
     }
     for (const [k, v] of Object.entries(env)) w.env.set(k, v)
-    on('fs.exists', ($, e) => {
-      checked.push(e.path)
-      return { value: files.includes(e.path) }
-    })
-    on('fs.write', ($, e) => {
-      written.set(e.path, e.text)
-      return { value: undefined }
-    })
-    return { w, written, checked }
+    return w
   }
 
-  const scripts = (w: World): string[] => w.argv.map(a => a[0] as string)
+  // The scripts the band and the commands run (not the existence probes or the support record).
+  const scripts = (w: World): string[] =>
+    w.argv.filter(a => !(a[1] === '-c' && a[2] === 'true') && !a.join(' ').includes('git-bash-path')).map(a => a[0] as string)
+  const probes = (w: World): string[] => w.argv.filter(a => a[1] === '-c' && a[2] === 'true').map(a => a[0] as string)
 
   test('no CLAUDE_CODE_GIT_BASH_PATH and Git under Program Files: every script runs with that exact path, and the band draws', async ($, on) => {
-    const { w, written } = windows(on, [PF])
+    const w = windows(on, [PF])
     await start($)
-    expect(w.argv.length).toBeGreaterThan(0)
+    expect(scripts(w).length).toBeGreaterThan(0)
     expect(new Set(scripts(w))).toEqual(new Set([PF]))
     const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
     expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi/ })).toBeDefined()
     expect(await ui.find({ text: NOT_FOUND })).toBeUndefined()
     await ui.unmount()
-    // The one local debug file: the path, nothing else.
-    expect(written.get(DEBUG_FILE)).toBe(`${PF}\n`)
-    expect([...written.keys()]).toEqual([DEBUG_FILE])
+    // The one local support record: the path, once.
+    expect(w.recorded).toEqual([PF])
   })
 
-  test('CLAUDE_CODE_GIT_BASH_PATH set to a file that exists wins over the standard folders', async ($, on) => {
+  test('CLAUDE_CODE_GIT_BASH_PATH set to a file that starts wins over the standard folders', async ($, on) => {
     const own = 'D:\\Tools\\Git\\bin\\bash.exe'
-    const { w, written } = windows(on, [own, PF], { CLAUDE_CODE_GIT_BASH_PATH: own })
+    const w = windows(on, [own, PF], { CLAUDE_CODE_GIT_BASH_PATH: own })
     await start($)
     expect(new Set(scripts(w))).toEqual(new Set([own]))
-    expect(written.get(DEBUG_FILE)).toBe(`${own}\n`)
+    expect(w.recorded).toEqual([own])
+    expect(probes(w)).toEqual([own])
   })
 
   test('CLAUDE_CODE_GIT_BASH_PATH set to a file that is not there falls back to the standard folders', async ($, on) => {
-    const { w } = windows(on, [PF], { CLAUDE_CODE_GIT_BASH_PATH: 'D:\\Gone\\bash.exe' })
+    const w = windows(on, [PF], { CLAUDE_CODE_GIT_BASH_PATH: 'D:\\Gone\\bash.exe' })
     await start($)
     expect(new Set(scripts(w))).toEqual(new Set([PF]))
   })
 
   test('the standard folders are tried in order: Program Files, Program Files (x86), then the per-user install', async ($, on) => {
-    const a = windows(on, [PF86, LOCAL])
+    const w = windows(on, [PF86, LOCAL])
     await start($)
-    expect(new Set(scripts(a.w))).toEqual(new Set([PF86]))
+    expect(probes(w).slice(0, 2)).toEqual([PF, PF86])
+    expect(new Set(scripts(w))).toEqual(new Set([PF86]))
   })
 
   test('only the per-user install present: it is used', async ($, on) => {
-    const { w } = windows(on, [LOCAL])
+    const w = windows(on, [LOCAL])
     await start($)
+    expect(probes(w)).toEqual([PF, PF86, LOCAL])
     expect(new Set(scripts(w))).toEqual(new Set([LOCAL]))
   })
 
   test('Windows\' own bash.exe (the WSL launcher) is never used, not even when the variable names it', async ($, on) => {
-    const { w, checked } = windows(on, [SYSTEM32, 'C:\\Windows\\sysnative\\bash.exe'], { CLAUDE_CODE_GIT_BASH_PATH: SYSTEM32 })
+    const w = windows(on, [SYSTEM32, 'C:\\Windows\\sysnative\\bash.exe'], { CLAUDE_CODE_GIT_BASH_PATH: SYSTEM32 })
     await start($)
-    expect(w.argv).toEqual([])
-    // never even asked for: the launcher is rejected before any lookup
-    expect(checked).not.toContain(SYSTEM32)
+    expect(scripts(w)).toEqual([])
+    // never even started: the launcher is rejected before any probe
+    expect(probes(w)).not.toContain(SYSTEM32)
+    expect(w.recorded).toEqual([])
   })
 
-  test('only System32 bash present, enrolled: no script runs, the band shows one plain line, the first message says the same', async ($, on) => {
-    const { w, written } = windows(on, [SYSTEM32, CREDENTIAL])
+  test('only System32 bash present: no script runs, the band shows one plain line, the first message says the same', async ($, on) => {
+    const w = windows(on, [SYSTEM32])
     await start($)
-    expect(w.argv).toEqual([])
+    expect(scripts(w)).toEqual([])
     expect(w.toasts).toEqual([`${NOT_FOUND}.`])
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
@@ -1128,38 +1129,21 @@ describe('Git Bash on Windows (AIO-905)', () => {
       expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
       await ui.unmount()
     }
-    expect(w.argv).toEqual([])
-    expect(written.get(DEBUG_FILE)).toBe('not found\n')
-    // A press or a command fails soft, still without a process.
+    // A command fails soft, still without starting a process.
+    const before = w.argv.length
     const r = await $.command.run({ command: 'aionas-bypass', args: 'output_trim' } as never)
     expect(r.text).toContain('could not run')
-    expect(w.argv).toEqual([])
+    expect(w.argv.length).toBe(before)
+    expect(scripts(w)).toEqual([])
+    expect(w.recorded).toEqual([])
   })
 
-  test('no Git Bash on a computer the one install never enrolled: the band stays silent (engine band), no message', async ($, on) => {
-    const { w } = windows(on, [])
-    await start($)
-    expect(w.toasts).toEqual([])
-    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-    expect(await ui.find({ text: /Git Bash/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: 'engine band' })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('macOS and Linux are unchanged: the bare word or the variable, no file lookup, no debug file', async ($, on) => {
+  test('macOS and Linux are unchanged: the bare word, no probe, no support record', async ($, on) => {
     const w = world(on)
-    const touched: string[] = []
-    on('fs.exists', ($, e) => {
-      touched.push(e.path)
-      return { value: false }
-    })
-    on('fs.write', ($, e) => {
-      touched.push(e.path)
-      return { value: undefined }
-    })
     await start($)
-    expect(new Set(scripts(w))).toEqual(new Set(['bash']))
-    expect(touched).toEqual([])
+    expect(new Set(w.argv.map(a => a[0]))).toEqual(new Set(['bash']))
+    expect(probes(w)).toEqual([])
+    expect(w.recorded).toEqual([])
     expect(w.toasts).toEqual([])
   })
 
@@ -1167,6 +1151,7 @@ describe('Git Bash on Windows (AIO-905)', () => {
     const w = world(on)
     w.env.set('CLAUDE_CODE_GIT_BASH_PATH', '/opt/homebrew/bin/bash')
     await start($)
-    expect(new Set(scripts(w))).toEqual(new Set(['/opt/homebrew/bin/bash']))
+    expect(new Set(w.argv.map(a => a[0]))).toEqual(new Set(['/opt/homebrew/bin/bash']))
+    expect(probes(w)).toEqual([])
   })
 })

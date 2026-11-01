@@ -35,6 +35,11 @@
 #                                on now ("-" for none), from the value it
 #                                started with (BASE, "" for none); the mod sets
 #                                it before each sub-agent starts
+#   aionas-bypass.sh --subagent-start
+#                                count one sub-agent start for subagent_sonnet:
+#                                fired while the method is active for this
+#                                session, else skipped (the mod runs it once
+#                                per sub-agent start; prints nothing, exit 0)
 #
 # Prints one line for the person. Exit 0 on success, 1 when nothing was done,
 # 2 for a usage error.
@@ -88,6 +93,11 @@ fi
 if [ "${1:-}" = --subagent-model ]; then
   aionas_subagent_model "${2:-}" "$SID"
   exit $?
+fi
+
+if [ "${1:-}" = --subagent-start ]; then
+  aionas_subagent_count "$SID"
+  exit 0
 fi
 
 if [ "${1:-}" = --count ]; then

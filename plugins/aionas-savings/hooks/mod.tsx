@@ -159,6 +159,13 @@ async function subagentModel($: EngineInterface): Promise<void> {
   if ((await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) !== want) await $.env.set('CLAUDE_CODE_SUBAGENT_MODEL', want)
 }
 
+// One count per sub-agent start (W25P-P4): fired while subagent_sonnet is on
+// for this session, else skipped. The script decides and queues the row; a
+// failure here never reaches the sub-agent.
+async function subagentCount($: EngineInterface): Promise<void> {
+  await bypass($, ['--subagent-start'])
+}
+
 // The band's facts, read again (§6): at session start, every 30 s, after a
 // press and after each main-loop turn. One read at a time. While a countdown
 // runs (the xhigh window, the handoff doc, the cold time) a 15 s timer keeps
@@ -407,6 +414,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
+    await subagentCount($)
     await subagentModel($)
     return next(e)
   }).catch(($, e, next) => next(e))

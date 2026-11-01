@@ -2,7 +2,7 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
-## Unreleased (0.5.0)
+## 0.5.0 (2026-11-01)
 
 - **The band and the mod's scripts find Git Bash on Windows** (AIO‑905): inside Claude Desktop the mod ran its scripts with the bare word `bash`, which on Windows is missing or is the WSL launcher, so the band never showed. It now uses `CLAUDE_CODE_GIT_BASH_PATH` when that names a file, else `Program Files\Git\bin\bash.exe`, `Program Files (x86)\Git\bin\bash.exe` or the per-user `Programs\Git\bin\bash.exe`, never `PATH` and never Windows' own `bash.exe`. Existence is checked by starting the candidate with `-c true`, so the mod reads no file. Where none starts the band shows one plain line and the session says so; the path found is kept in `~/.aionas/agent/state/git-bash-path`. macOS and Linux are unchanged.
 - **Plan detection reads the member's own tier, knows Ultra, and names the Claude organization** (AIO‑899, AIO‑900, AIO‑901): the plan report uses `userRateLimitTier` (else the organization's) so a Team premium seat is `team_premium`; a tier containing `ultra` is `max_20x` (plan ids are unchanged); every sample also carries `organization_uuid` and a cleaned `organization_name` when Claude Code has them.

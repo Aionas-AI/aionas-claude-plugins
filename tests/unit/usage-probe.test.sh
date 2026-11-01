@@ -71,24 +71,24 @@ fresh_hour() { rm -f "$(stamp)"; }
 # alive PID
 alive() { kill -0 "$1" 2>/dev/null; }
 
-test_second_session_within_the_hour_does_not_probe_again() {
+test_second_session_within_4_hours_does_not_probe_again() {
   up_setup
   hook; hook
   t_eq 1 "$(runs)" "stub invocation count"
   t_eq 1 "$(t_calls)"
-  export AIONAS_NOW=$((NOW0 + 3599)); hook
-  t_eq 1 "$(runs)" "59 min 59 s later"
-  export AIONAS_NOW=$((NOW0 + 3600)); hook
-  t_eq 2 "$(runs)" "an hour later it probes again"
+  export AIONAS_NOW=$((NOW0 + 14399)); hook
+  t_eq 1 "$(runs)" "3 h 59 min 59 s later"
+  export AIONAS_NOW=$((NOW0 + 14400)); hook
+  t_eq 2 "$(runs)" "4 hours later it probes again"
   t_eq 2 "$(t_calls)"
 }
 
-test_the_stamp_is_written_before_the_probe_and_a_failed_send_waits_the_hour() {
+test_the_stamp_is_written_before_the_probe_and_a_failed_send_waits_4_hours() {
   up_setup
   FAKE_CURL_STATUS=500 hook; t_eq 0 $? "exit 0 on a failed send"
   t_eq "$NOW0" "$(cat "$(stamp)")"
   hook
-  t_eq 1 "$(runs)" "a failed send does not re-probe within the hour"
+  t_eq 1 "$(runs)" "a failed send does not re-probe within 4 hours"
   t_eq 1 "$(t_calls)"
 }
 
@@ -371,10 +371,25 @@ test_a_fresh_status_line_figure_means_no_probe() {
   printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 100)) >"$tap"
   hook
   t_eq 0 "$(runs)" "figure 100 s old"
-  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 3599)) >"$tap"
-  hook; t_eq 0 "$(runs)" "figure 3599 s old"
-  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 3600)) >"$tap"
-  hook; t_eq 1 "$(runs)" "figure exactly an hour old"
+  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 14399)) >"$tap"
+  hook; t_eq 0 "$(runs)" "figure 14399 s old"
+  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 14400)) >"$tap"
+  hook; t_eq 1 "$(runs)" "figure exactly 4 hours old"
+}
+
+test_the_four_hour_boundary_for_the_stamp_and_for_the_tap() {
+  up_setup
+  hook; t_eq 1 "$(runs)" "first start probes"
+  export AIONAS_NOW=$((NOW0 + 3 * 3600 + 59 * 60)); hook
+  t_eq 1 "$(runs)" "last probe 3 h 59 min ago: no probe"
+  export AIONAS_NOW=$((NOW0 + 4 * 3600 + 60)); hook
+  t_eq 2 "$(runs)" "last probe 4 h 01 min ago: probe"
+  local tap="$(agent)/state/plan-usage/claude.last"
+  mkdir -p "$(dirname "$tap")"
+  fresh_hour; export AIONAS_NOW=$NOW0
+  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - (3 * 3600 + 59 * 60))) >"$tap"
+  local before; before=$(runs)
+  hook; t_eq "$before" "$(runs)" "tap figure 3 h 59 min old: no probe"
 }
 
 test_a_stale_or_unreadable_status_line_figure_does_not_stop_the_probe() {
@@ -600,7 +615,7 @@ test_a_hung_child_is_stopped_and_nothing_is_sent() {
   t_eq 0 "$(counter)" "a timeout is not a too-large result"
   t_eq "" "$(find "$(pdir)" -mindepth 1)"
   t_not test -d "$(aionas_savings_dir)/locks/usage-probe.lock"
-  t_eq "$NOW0" "$(cat "$(stamp)")" "a hung start is not retried before the hour is over"
+  t_eq "$NOW0" "$(cat "$(stamp)")" "a hung start is not retried before the 4 hours are over"
 }
 
 test_a_timeout_kills_the_whole_process_group() {

@@ -14,7 +14,7 @@ completed_at: 2026-11-01
 
 ## Outcome
 
-The hourly usage probe no longer parses anything. It still runs Claude Code's own `/usage` (same binary lookup, hourly stamp, fresh-tap skip, no-account skip, recursion guard, process-group kill, 20 s timeout, 64 KiB output cap), and when the JSON it prints has `local_command == "usage"`, `is_error == false` and a string `result`, it sends that `result` unchanged as `usage_raw` in one `usage_cmd` sample. The gateway (lane e1) reads the weekly figure and keeps the raw text when its parse fails. A result over 32 KiB (decoded, in bytes) is not sent and is counted locally as `usage_probe_too_large`. Observed against a stub `claude` only (no real login, no model call): the sanitized real 2.1.311 capture produces one POST whose `usage_raw` is the `result` byte for byte (checked by decoding both JSON documents with an independent JSON parser, and by comparing the escaped text to the body string).
+The usage probe (at most once every 4 hours) no longer parses anything. It still runs Claude Code's own `/usage` (same binary lookup, 4-hour stamp, fresh-tap skip, no-account skip, recursion guard, process-group kill, 20 s timeout, 64 KiB output cap), and when the JSON it prints has `local_command == "usage"`, `is_error == false` and a string `result`, it sends that `result` unchanged as `usage_raw` in one `usage_cmd` sample. The gateway (lane e1) reads the weekly figure and keeps the raw text when its parse fails. A result over 32 KiB (decoded, in bytes) is not sent and is counted locally as `usage_probe_too_large`. Observed against a stub `claude` only (no real login, no model call): the sanitized real 2.1.311 capture produces one POST whose `usage_raw` is the `result` byte for byte (checked by decoding both JSON documents with an independent JSON parser, and by comparing the escaped text to the body string).
 
 ## Body shape for the gateway lane e1 (exact)
 
@@ -90,7 +90,7 @@ command: bash tests/security/egress-manifest.sh | diff - security/egress-manifes
 | `test_there_is_no_unparsed_counter_and_no_parser_left` | no `usage_probe_unparsed` file, no `usage-probe.awk`, none of the parser or reset functions or the zone directory in the code |
 | `test_claude_version_is_sent_only_when_the_path_already_names_it` | PATH binary: no field and one run per probe; Desktop folder and VS Code folder: the number only |
 | `test_output_over_the_cap_stops_the_child_and_sends_nothing` | now also: counted as too large |
-| everything of the old item-1 set (hourly stamp, fresh tap, no account, API-key logins, binary lookup order and symlink rules, `AIONAS_USAGE_PROBE` guard in every hook, process-group kill, timeout, TERM to the hook, five parallel starts, lock) | unchanged and green |
+| everything of the old item-1 set (4-hour stamp, fresh tap, no account, API-key logins, binary lookup order and symlink rules, `AIONAS_USAGE_PROBE` guard in every hook, process-group kill, timeout, TERM to the hook, five parallel starts, lock) | unchanged and green |
 
 ## Security, privacy and reliability
 

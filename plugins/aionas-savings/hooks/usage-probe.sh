@@ -2,8 +2,8 @@
 # aionas-savings hook: usage-probe (SessionStart, async). Owner: AIO-892.
 # A member who runs Claude Code in Claude Desktop or the VS Code extension never
 # renders the status line, so the status-line tap sends no weekly figure. Once
-# an hour at most, on an enrolled computer, when the tap has stored no weekly
-# figure in the last hour, this runs Claude Code's own /usage command as a child
+# 4 hours at most, on an enrolled computer, when the tap has stored no weekly
+# figure in the last 4 hours, this runs Claude Code's own /usage command as a child
 # (claude -p "/usage" --no-session-persistence --output-format json, 20 s, from
 # ~/.aionas/agent/state/usage-probe, AIONAS_USAGE_PROBE=1 in its environment)
 # and sends the whole text of its result, as it is, as one usage_cmd sample: the

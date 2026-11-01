@@ -2,7 +2,7 @@
 # hooks/usage-probe.sh only (not by aionas.sh). POSIX sh; also bash 3.2 and Git
 # Bash. A member who runs Claude Code in Claude Desktop or the VS Code
 # extension never renders the status line, so the status-line tap sends no
-# weekly figure. This runs Claude Code's own /usage command, once an hour, and
+# weekly figure. This runs Claude Code's own /usage command, once every 4 hours, and
 # sends its whole text to the organization's own gateway, which reads the
 # figure out of it. The plugin does not parse the text.
 #
@@ -16,7 +16,7 @@
 
 # The probe runs at most this often per computer (stamp), and is skipped when
 # the status-line tap stored a weekly figure this recently.
-AIONAS_UP_INTERVAL=3600
+AIONAS_UP_INTERVAL=14400
 # Output of the child larger than this is not read (the child is stopped).
 AIONAS_UP_MAX_BYTES=65536
 # A result text (decoded, in bytes) larger than this is not sent.
@@ -37,7 +37,7 @@ _up_resp=""
 _up_lockheld=""
 
 # aionas_up_tap_fresh NOW: exit 0 when the status-line tap stored a figure less
-# than an hour ago (state/plan-usage/claude.last is "pct|reset|at").
+# than 4 hours ago (state/plan-usage/claude.last is "pct|reset|at").
 aionas_up_tap_fresh() {
   _uf_f="$(aionas_agent_dir)/state/plan-usage/claude.last"
   [ -f "$_uf_f" ] || return 1
@@ -48,7 +48,7 @@ aionas_up_tap_fresh() {
   [ "$_uf_d" -ge 0 ] && [ "$_uf_d" -lt "$AIONAS_UP_INTERVAL" ]
 }
 
-# aionas_up_stamp_fresh NOW: exit 0 when a probe started less than an hour ago.
+# aionas_up_stamp_fresh NOW: exit 0 when a probe started less than 4 hours ago.
 aionas_up_stamp_fresh() {
   _us_t=$(cat "$(aionas_savings_dir)/usage-probe.last" 2>/dev/null)
   aionas_is_uint "${_us_t:-x}" || return 1
@@ -74,7 +74,7 @@ aionas_up_newest_first() {
 # file (Desktop's own mark), else "U<TAB>path". Anything with a symlink on the
 # way is left out: the version folder, the build folder (or <X.Y.Z> itself for
 # the second layout), claude.app, Contents, MacOS and the binary. A symlink
-# there could point the hourly run at a program the member never installed.
+# there could point the 4-hourly run at a program the member never installed.
 aionas_up_desktop_list() {
   _dl_base="$(aionas_home)/Library/Application Support/Claude/claude-code"
   for _dl_v in $(ls -1 "$_dl_base" 2>/dev/null | grep -E '^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$' | aionas_up_newest_first); do
@@ -257,7 +257,7 @@ EOF
   (umask 077; set -C; : >"$_up_out") 2>/dev/null || { _up_out=""; return 0; }
 
   # The stamp goes down BEFORE the child starts: a hung or failed run is not
-  # retried before the hour is over.
+  # retried before the 4 hours are over.
   printf '%s\n' "$_r_now" | aionas_write_atomic "$(aionas_savings_dir)/usage-probe.last" || return 0
 
   # Job control makes the background child the leader of its own process group

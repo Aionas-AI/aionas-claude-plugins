@@ -13,7 +13,7 @@ How a change reaches customer computers:
   CI fails when the code and that list disagree.
 - Release tags `aionas-savings-v*` cannot be moved or deleted.
 
-What leaves the computer, beyond numbers and names: once an hour, on a
+What leaves the computer, beyond numbers and names: once every 4 hours, on a
 computer where Claude Code runs outside the terminal UI, the plugin sends the
 full text of Claude Code's own `/usage` result (at most 32 KiB) to the
 organization's own gateway, by the owner's ruling, so the gateway can read the

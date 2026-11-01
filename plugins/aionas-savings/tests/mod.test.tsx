@@ -1118,6 +1118,56 @@ describe('Git Bash on Windows (AIO-905)', () => {
     expect(w.recorded).toEqual([])
   })
 
+  // A variable that is not an absolute path to bash.exe is never probed or
+  // used (a bare name would be found from the working folder or PATH), and
+  // the WSL check cannot be walked around with "..", a missing extension, a
+  // doubled separator or a trailing space.
+  const BAD_VARS: Array<[string, string]> = [
+    ['a bare bash', 'bash'],
+    ['a bare bash.exe', 'bash.exe'],
+    ['a relative path', 'Git\\bin\\bash.exe'],
+    ['a path with ..', 'C:\\Windows\\System32\\..\\System32\\bash.exe'],
+    ['a path with ..\\ out of Git', 'C:\\Program Files\\Git\\..\\..\\Windows\\System32\\bash.exe'],
+    ['an extension-less System32 path', 'C:\\Windows\\System32\\bash'],
+    ['an extension-less Git path', 'C:\\Program Files\\Git\\bin\\bash'],
+    ['a doubled separator', 'C:\\Windows\\System32\\\\bash.exe'],
+    ['a trailing space', 'C:\\Windows\\System32\\bash.exe '],
+    ['a trailing dot', 'C:\\Windows\\System32\\bash.exe.'],
+    ['a file that is not bash.exe', 'D:\\Tools\\Git\\bin\\sh.exe'],
+    ['a device path', '\\\\?\\C:\\Windows\\System32\\bash.exe'],
+  ]
+  for (const [name, bad] of BAD_VARS) {
+    test(`CLAUDE_CODE_GIT_BASH_PATH as ${name} is never probed or used; the standard folder wins`, async ($, on) => {
+      const w = windows(on, [bad, bad.trim(), PF], { CLAUDE_CODE_GIT_BASH_PATH: bad })
+      await start($)
+      expect(probes(w)).not.toContain(bad)
+      expect(new Set(scripts(w))).toEqual(new Set([PF]))
+    })
+  }
+
+  test('a doubled separator in a System32 path with no Git Bash anywhere: nothing runs', async ($, on) => {
+    const bad = 'C:\\Windows\\\\System32\\bash.exe'
+    const w = windows(on, [bad], { CLAUDE_CODE_GIT_BASH_PATH: bad })
+    await start($)
+    expect(probes(w)).toEqual([PF, PF86, LOCAL])
+    expect(scripts(w)).toEqual([])
+  })
+
+  test('a Program Files folder that is relative gives no candidate; the others are still tried', async ($, on) => {
+    const rel = 'Program Files\\Git\\bin\\bash.exe'
+    const w = windows(on, [rel, LOCAL], { ProgramFiles: 'Program Files', 'ProgramFiles(x86)': '..\\Program Files (x86)' })
+    await start($)
+    expect(probes(w)).toEqual([LOCAL])
+    expect(new Set(scripts(w))).toEqual(new Set([LOCAL]))
+  })
+
+  test('an absolute UNC path to bash.exe is accepted', async ($, on) => {
+    const unc = '\\\\server\\tools\\Git\\bin\\bash.exe'
+    const w = windows(on, [unc], { CLAUDE_CODE_GIT_BASH_PATH: unc })
+    await start($)
+    expect(new Set(scripts(w))).toEqual(new Set([unc]))
+  })
+
   test('only System32 bash present: no script runs, the band shows one plain line, the first message says the same', async ($, on) => {
     const w = windows(on, [SYSTEM32])
     await start($)

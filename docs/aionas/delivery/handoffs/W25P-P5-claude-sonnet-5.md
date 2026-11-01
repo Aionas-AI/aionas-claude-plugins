@@ -115,3 +115,24 @@ make test
 make validate
 bash tests/security/egress-manifest.sh | diff - security/egress-manifest.txt
 ```
+
+## Review-fix log (2026-11-01, F1 major only)
+
+Finding F1 (review W25P-P5-review-2026-11-01): `CLAUDE_CODE_GIT_BASH_PATH` and the env-derived candidates were accepted when not absolute or not normalized, so a bare `bash`/`bash.exe` was probed and spawned by name (cwd or PATH lookup) and `isWslLauncher` was bypassed by `..`, a missing `.exe`, a doubled separator or a trailing space.
+
+Fix (`plugins/aionas-savings/hooks/mod.tsx`): new `isUsableBashPath` accepts only an absolute drive or UNC path (not the `\\?\` / `\\.\` forms), separators collapsed before the WSL check, no `.`/`..` part, no part ending in a dot or space, last part `bash.exe` (case-insensitive). `resolveBash` uses it for the variable; `gitBashCandidates` drops any candidate that fails it (a relative `ProgramFiles` gives none; a blank `ProgramFiles` falls back to `C:\Program Files`). macOS/Linux unchanged.
+
+Tests (`tests/mod.test.tsx`): 12 variable cases (bare bash, bare bash.exe, relative, `..` twice, extension-less System32 and Git, doubled separator, trailing space, trailing dot, not bash.exe, device path), doubled-separator with no Git Bash, relative ProgramFiles, accepted UNC path.
+
+```text
+command: claude 2.1.299 plugin validate . ; plugin validate plugins/aionas-savings ; plugin test plugins/aionas-savings (temp CLAUDE_CONFIG_DIR)
+actual result: rc 0 / 0 / 0; 69 pass, 0 fail (was 54 + the 15 new)
+command: make test
+actual result: ALL PASSED
+command: bash tests/security/egress-manifest.sh | diff - security/egress-manifest.txt
+actual result: identical
+command: AIONAS_CC_BIN=<2.1.299> bash tests/unit/band-privacy-gate.test.sh
+actual result: 4 passed, 1 failed (test_real_validate_report_on_the_pinned_claude_code) - the review's F3, failing at base too, outside this fix's fence; this fix adds no new env read
+```
+
+Unverified: still no live Windows Desktop run (items 1-6 above).

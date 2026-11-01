@@ -88,15 +88,37 @@ const EFFORT_ARGS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto']
 export const isWslLauncher = (path: string): boolean =>
   /[\\/](?:windows[\\/](?:system32|sysnative|syswow64)|windowsapps)[\\/]bash\.exe$/i.test(path)
 
+// A path the mod may start: absolute (a drive or a UNC share, not the \\?\ or
+// \\.\ device forms), no "." or ".." part, no part ending in a dot or space,
+// and the file is bash.exe. A bare "bash" or a relative path would be found
+// from the working folder or PATH, which is what Claude Code itself refuses.
+// Separators are collapsed first, so "\\\\" or "/" cannot slip past the WSL check.
+export const isUsableBashPath = (path: string): boolean => {
+  if (path !== path.trim()) return false
+  const unc = /^[\\/]{2}[^\\/]/.test(path)
+  const parts = (unc ? path.slice(2) : path).split(/[\\/]+/)
+  const drive = !unc && /^[A-Za-z]:$/.test(parts[0] ?? '')
+  // A drive and a file under it, or \\server\share\file with a real server name.
+  if (!drive && !(unc && parts.length >= 3 && !/^[?.]/.test(parts[0] ?? ''))) return false
+  if (parts.length < 2) return false
+  const rest = drive ? parts.slice(1) : parts
+  if (rest.some(p => p === '' || p === '.' || p === '..' || /[. ]$/.test(p))) return false
+  if ((rest[rest.length - 1] ?? '').toLowerCase() !== 'bash.exe') return false
+  return !isWslLauncher((unc ? '\\\\' : '') + parts.join('\\'))
+}
+
 const trimEnd = (dir: string): string => dir.replace(/[\\/]+$/, '')
 
-// The standard places for Git for Windows' bash.exe, in order.
+// The standard places for Git for Windows' bash.exe, in order. A folder the
+// environment names that is not an absolute path gives no candidate.
 export const gitBashCandidates = (dirs: { programFiles?: string; programFilesX86?: string; localAppData?: string }): string[] => {
   const out: string[] = []
   const add = (base: string | undefined, rest: string): void => {
-    if (base !== undefined && base.trim() !== '') out.push(`${trimEnd(base)}${rest}`)
+    if (base === undefined || base.trim() === '') return
+    const c = `${trimEnd(base)}${rest}`
+    if (isUsableBashPath(c)) out.push(c)
   }
-  add(dirs.programFiles ?? 'C:\\Program Files', '\\Git\\bin\\bash.exe')
+  add(isSet(dirs.programFiles) ? dirs.programFiles : 'C:\\Program Files', '\\Git\\bin\\bash.exe')
   add(dirs.programFilesX86, '\\Git\\bin\\bash.exe')
   add(dirs.localAppData, '\\Programs\\Git\\bin\\bash.exe')
   return out
@@ -176,7 +198,7 @@ async function resolveBash($: EngineInterface): Promise<void> {
     return
   }
   let found: string | undefined
-  if (isSet(set) && !isWslLauncher(set) && (await works($, set))) found = set
+  if (isSet(set) && isUsableBashPath(set) && (await works($, set))) found = set
   if (found === undefined) {
     const dirs = {
       programFiles: await $.env.get('ProgramFiles'),

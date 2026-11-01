@@ -14,14 +14,14 @@ NOW0=$(epoch_of 2026-11-01T00:00:00Z)
 
 # up_setup: an enrolled computer with a Claude login file, a private PATH that
 # holds only the stub claude (and tripwires for env, timeout and perl, which
-# the probe must never run from PATH), a pinned clock and the 41% fixture.
+# the probe must never run from PATH), a pinned clock and the real 2.1.311 capture.
 up_setup() {
   t_enroll
   STUB=$(mktemp -d "$T_ROOT/stub.XXXXXX"); STUB_LOG=$(mktemp -d "$T_ROOT/stublog.XXXXXX")
   export STUB STUB_LOG
   export PATH="$STUB:/usr/bin:/bin"
   export AIONAS_NOW=$NOW0
-  export STUB_OUTPUT="$FIX/usage-2.1.311.json"
+  export STUB_OUTPUT="$FIX/usage-2.1.311-real-capture.json"
   unset STUB_MODE STUB_DELAY STUB_HOOK_LIST AIONAS_USAGE_PROBE AIONAS_USAGE_PROBE_TIMEOUT
   export TZ=UTC
   install_stub "$STUB/claude"
@@ -43,84 +43,53 @@ runs() { find "$STUB_LOG" -mindepth 1 -maxdepth 1 -type d -name 'run.*' | wc -l 
 agent() { aionas_agent_dir; }
 pdir() { echo "$(agent)/state/usage-probe"; }
 stamp() { echo "$(aionas_savings_dir)/usage-probe.last"; }
-counter() { cat "$(aionas_savings_dir)/counters/usage_probe_unparsed" 2>/dev/null || echo 0; }
+counter() { cat "$(aionas_savings_dir)/counters/usage_probe_too_large" 2>/dev/null || echo 0; }
+bad_text_counter() { cat "$(aionas_savings_dir)/counters/usage_probe_bad_text" 2>/dev/null || echo 0; }
 body() { t_call "$(t_calls)" body; }
-resets_sent() { body | sed -n 's/.*"resets_at":"\([^"]*\)".*/\1/p'; }
-# usage_out RESULT_TEXT [LOCAL_COMMAND]: the stub prints a /usage JSON whose
-# result is RESULT_TEXT (already JSON-escaped, \n for a new line).
+body_file() { echo "$FAKE_CURL_LOG/$(t_calls)/body"; }
+# usage_out RESULT_TEXT [LOCAL_COMMAND [IS_ERROR]]: the stub prints a /usage JSON
+# whose result is RESULT_TEXT (already JSON-escaped, \n for a new line).
 usage_out() {
   local f; f=$(mktemp "$T_ROOT/usage.XXXXXX")
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"%s","local_command":"%s","total_cost_usd":0}\n' "$1" "${2:-usage}" >"$f"
+  printf '{"type":"result","subtype":"success","is_error":%s,"result":"%s","local_command":"%s","total_cost_usd":0}\n' "${3:-false}" "$1" "${2:-usage}" >"$f"
   export STUB_OUTPUT=$f
+}
+# raw_of FILE: the JSON-escaped text of "result" in a /usage JSON file (sed only).
+raw_of() { sed -En 's/.*"result":"(([^"\\]|\\.)*)".*/\1/p' "$1"; }
+# same_text FIXTURE_JSON BODY_FILE: python decodes both JSON documents; the
+# result and the usage_raw must be the same string, byte for byte (UTF-8).
+# Skipped (returns 0) where python3 is missing.
+same_text() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1], encoding="utf-8"))["result"].encode("utf-8")
+b = json.load(open(sys.argv[2], encoding="utf-8"))["usage_raw"].encode("utf-8")
+sys.exit(0 if a == b else 1)
+PY
 }
 fresh_hour() { rm -f "$(stamp)"; }
 # alive PID
 alive() { kill -0 "$1" 2>/dev/null; }
 
-test_fixture_41_sends_exactly_one_usage_cmd_sample() {
-  up_setup
-  local out rc
-  out=$(hook 2>&1); rc=$?
-  t_eq 0 "$rc" "exit 0"
-  t_eq "" "$out" "the async hook prints nothing"
-  t_eq 1 "$(runs)" "one probe"
-  t_eq 1 "$(t_calls)" "one sample"
-  t_eq POST "$(t_call 1 method)"
-  t_eq "https://gw.example.test/cc-quota/v1/samples" "$(t_call 1 url)"
-  t_contains "$(t_call 1 headers)" "Authorization: Bearer $T_ALIAS"
-  t_lacks "$(t_call 1 args)" "$T_ALIAS" "the alias is never on a command line"
-  t_eq "{\"tool\":\"claude_code\",\"source\":\"usage_cmd\",\"observed_at\":\"2026-11-01T00:00:00Z\",\"account_uuid\":\"$UUID\",\"organization_uuid\":\"$ORGUUID\",\"organization_name\":\"Example Org\",\"windows\":[{\"kind\":\"weekly_all\",\"window_minutes\":10080,\"used_percent\":41,\"resets_at\":\"2026-11-03T03:59:00Z\"}]}" "$(body)"
-}
-
-test_real_2_1_311_capture_sends_only_the_all_models_weekly_line() {
-  up_setup
-  export STUB_OUTPUT="$FIX/usage-2.1.311-real-capture.json"
-  hook
-  t_eq 1 "$(t_calls)" "one sample"
-  # (a) the all-models line: 47, and the reset the 41% fixture logic gives for the same text
-  t_eq "{\"tool\":\"claude_code\",\"source\":\"usage_cmd\",\"observed_at\":\"2026-11-01T00:00:00Z\",\"account_uuid\":\"$UUID\",\"organization_uuid\":\"$ORGUUID\",\"organization_name\":\"Example Org\",\"windows\":[{\"kind\":\"weekly_all\",\"window_minutes\":10080,\"used_percent\":47,\"resets_at\":\"2026-11-03T03:59:00Z\"}]}" "$(body)"
-  # (b) no text of the result leaves the computer
-  local b w; b=$(body)
-  for w in "contributing" "requests" "subagents" "example-repo" "example-skill" "example-mcp" "Fable" "%  " "subscription" "sessions"; do
-    t_lacks "$b" "$w"
-  done
-  # (c) a percentage of the contributing section is never the weekly figure
-  local p
-  for p in 83 72 71 5 4 2 1; do
-    t_lacks "$b" "\"used_percent\":$p,"
-    t_lacks "$b" "\"used_percent\":$p}"
-  done
-}
-
-test_nothing_but_the_numbers_leaves_the_computer() {
-  up_setup
-  hook
-  local b; b=$(body)
-  local w
-  for w in "Current" "result" "resets " "Jerusalem" "Asia" "used ·" "utilization" "five_hour" "session" "Fable" "CANARY-EMAIL" "SECRET-USER-ID"; do
-    t_lacks "$b" "$w"
-  done
-  t_lacks "$(cat "$FAKE_CURL_LOG"/*/args)" "Current week"
-}
-
-test_second_session_within_the_hour_does_not_probe_again() {
+test_second_session_within_4_hours_does_not_probe_again() {
   up_setup
   hook; hook
   t_eq 1 "$(runs)" "stub invocation count"
   t_eq 1 "$(t_calls)"
-  export AIONAS_NOW=$((NOW0 + 3599)); hook
-  t_eq 1 "$(runs)" "59 min 59 s later"
-  export AIONAS_NOW=$((NOW0 + 3600)); hook
-  t_eq 2 "$(runs)" "an hour later it probes again"
+  export AIONAS_NOW=$((NOW0 + 14399)); hook
+  t_eq 1 "$(runs)" "3 h 59 min 59 s later"
+  export AIONAS_NOW=$((NOW0 + 14400)); hook
+  t_eq 2 "$(runs)" "4 hours later it probes again"
   t_eq 2 "$(t_calls)"
 }
 
-test_the_stamp_is_written_before_the_probe_and_a_failed_send_waits_the_hour() {
+test_the_stamp_is_written_before_the_probe_and_a_failed_send_waits_4_hours() {
   up_setup
   FAKE_CURL_STATUS=500 hook; t_eq 0 $? "exit 0 on a failed send"
   t_eq "$NOW0" "$(cat "$(stamp)")"
   hook
-  t_eq 1 "$(runs)" "a failed send does not re-probe within the hour"
+  t_eq 1 "$(runs)" "a failed send does not re-probe within 4 hours"
   t_eq 1 "$(t_calls)"
 }
 
@@ -205,200 +174,239 @@ test_aionas_sh_exits_the_sourcing_shell_on_the_variable() {
   t_eq 1 "$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$T_PLUGIN/lib/aionas.sh" | grep -n 'AIONAS_USAGE_PROBE' | head -1 | cut -d: -f1)" "the guard is the first code line of aionas.sh"
 }
 
-test_unrecognized_text_sends_nothing_and_counts() {
+# The POSTed body for the default account of up_setup, with the usage_raw text
+# (JSON-escaped, as in the /usage output) and an optional claude_version.
+want_body() {
+  printf '{"tool":"claude_code","source":"usage_cmd","observed_at":"2026-11-01T00:00:00Z","account_uuid":"%s","organization_uuid":"%s","organization_name":"Example Org"%s,"windows":[{"kind":"weekly_all","window_minutes":10080}],"usage_raw":"%s"}' \
+    "$UUID" "$ORGUUID" "${2:+,\"claude_version\":\"$2\"}" "$1"
+}
+
+test_real_2_1_311_capture_sends_the_whole_result_as_usage_raw() {
   up_setup
-  usage_out 'Something new: 41% of the week'
+  local out rc
+  out=$(hook 2>&1); rc=$?
+  t_eq 0 "$rc" "exit 0"
+  t_eq "" "$out" "the async hook prints nothing"
+  t_eq 1 "$(runs)" "one probe"
+  t_eq 1 "$(t_calls)" "one sample"
+  t_eq POST "$(t_call 1 method)"
+  t_eq "https://gw.example.test/cc-quota/v1/samples" "$(t_call 1 url)"
+  t_contains "$(t_call 1 headers)" "Authorization: Bearer $T_ALIAS"
+  t_lacks "$(t_call 1 args)" "$T_ALIAS" "the alias is never on a command line"
+  local raw; raw=$(raw_of "$FIX/usage-2.1.311-real-capture.json")
+  t_contains "$raw" "example-mcp" "the fixture text was read"
+  t_eq "$(want_body "$raw")" "$(body)" "the exact body"
+  same_text "$FIX/usage-2.1.311-real-capture.json" "$(body_file)" || t_fail "usage_raw differs from result"
+  # the middle dot and the newlines, as the member's computer printed them
+  t_contains "$(body)" 'Current week (all models): 47% used · resets Nov 3 at 5:59am (Asia/Jerusalem)\nCurrent week (Fable): 1% used'
+  t_contains "$(body)" "Last 24h · 2255 requests · 7 sessions"
+  t_contains "$(body)" "~/projects/example-repo"
+}
+
+test_the_body_carries_no_parsed_figure() {
+  up_setup
   hook
-  t_eq 1 "$(runs)"
-  t_eq 0 "$(t_calls)" "no sample"
-  t_eq 1 "$(counter)" "usage_probe_unparsed"
-  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
-  export AIONAS_NOW=$((NOW0 + 3600)); hook
-  t_eq 2 "$(counter)"
-  t_eq 0 "$(t_calls)"
+  local b w; b=$(body)
+  # outside the text itself nothing but the ids and the fixed fields
+  local rest=${b%%\"usage_raw\":*}
+  for w in utilization used_percent resets_at percent five_hour CANARY-EMAIL SECRET-USER-ID; do
+    t_lacks "$b" "$w"
+  done
+  t_lacks "$rest" "Current" "the text appears only in usage_raw"
+  t_lacks "$(cat "$FAKE_CURL_LOG"/*/args)" "Current week"
 }
 
-test_the_gateway_counter_list_is_never_touched() {
+test_a_short_result_is_sent_whole_too() {
   up_setup
-  usage_out 'nope'
-  hook
-  t_eq 0 "$(t_calls)"
-  t_lacks "$(cat "$T_PLUGIN/lib/catalog.sh")" usage_probe_unparsed "catalog.sh stays closed: the gateway rejects a batch with an unknown counter"
-  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
-}
-
-test_only_a_usage_local_command_with_the_all_models_line_is_a_sample() {
-  up_setup
-  local n=0
-  check_unparsed() {
-    n=$((n + 1)); fresh_hour; hook
-    t_eq "$n" "$(counter)" "$1"
-    t_eq 0 "$(t_calls)" "$1"
-  }
-  usage_out 'Current week (all models): 41% used · resets Nov 3 at 5:59am (Asia/Jerusalem)' cost
-  check_unparsed "local_command is not usage"
-  usage_out 'Current week (Fable): 1% used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
-  check_unparsed "only a model line"
-  usage_out 'Current session: 3% used · resets 8:00am (Asia/Jerusalem)'
-  check_unparsed "only the session line"
-  usage_out 'Current week (all models): 101% used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
-  check_unparsed "over 100"
-  usage_out 'Current week (all models): -3% used'
-  check_unparsed "negative"
-  usage_out 'Current week (all models): 4a% used'
-  check_unparsed "not a number"
-  usage_out 'Current week (all models): 41 used'
-  check_unparsed "no percent sign"
-  usage_out 'Current week (all models):41% used'
-  check_unparsed "no space"
-  usage_out 'prefix Current week (all models): 41% used'
-  check_unparsed "line does not start with the label"
-  usage_out 'Current week (all models): 1234% used'
-  check_unparsed "four digits"
-  printf 'not json at all\n' >"$T_ROOT/notjson"; export STUB_OUTPUT=$T_ROOT/notjson
-  check_unparsed "not JSON"
-  printf '{"local_command":"usage","result":' >"$T_ROOT/trunc"; export STUB_OUTPUT=$T_ROOT/trunc
-  check_unparsed "truncated JSON"
-  printf '{"local_command":"usage","result":["Current week (all models): 41%% used"]}' >"$T_ROOT/arr"; export STUB_OUTPUT=$T_ROOT/arr
-  check_unparsed "result is not a string"
-  printf '{"nested":{"local_command":"usage","result":"Current week (all models): 41%% used"}}' >"$T_ROOT/nest"; export STUB_OUTPUT=$T_ROOT/nest
-  check_unparsed "keys must be top level"
-  usage_out 'Current week (all models): 41% used'
-  export STUB_MODE=exit1
-  check_unparsed "the child failed"
-  unset STUB_MODE
-  head -c 200000 /dev/zero | tr '\0' 'x' >"$T_ROOT/big"; export STUB_OUTPUT=$T_ROOT/big
-  check_unparsed "output over the size cap"
-}
-
-test_the_fable_line_never_stands_in_for_the_all_models_line() {
-  up_setup
-  usage_out 'Current week (Fable): 7% used · resets Nov 3 at 5:59am (Asia/Jerusalem)\nCurrent week (all models): 41% used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
+  export STUB_OUTPUT="$FIX/usage-2.1.311.json"
   hook
   t_eq 1 "$(t_calls)"
-  t_contains "$(body)" '"used_percent":41,'
-  t_lacks "$(body)" '"used_percent":7'
+  t_eq "$(want_body "$(raw_of "$FIX/usage-2.1.311.json")")" "$(body)"
+  same_text "$FIX/usage-2.1.311.json" "$(body_file)" || t_fail "usage_raw differs from result"
 }
 
-test_percent_forms() {
+test_json_escapes_in_the_result_survive_byte_for_byte() {
   up_setup
-  usage_out 'Current week (all models): 41.5% used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
-  hook; t_contains "$(body)" '"used_percent":41.5,'
-  fresh_hour; usage_out 'Current week (all models): 0% used'
-  hook; t_contains "$(body)" '"used_percent":0}'
-  fresh_hour; usage_out 'Current week (all models): 100% used'
-  hook; t_contains "$(body)" '"used_percent":100}'
-  fresh_hour; usage_out 'Current week (all models): 007% used'
-  hook; t_contains "$(body)" '"used_percent":7}'
-  t_eq 4 "$(t_calls)"
-  t_lacks "$(body)" "resets_at" "no reset text: a sample without resets_at"
-}
-
-test_the_middle_dot_may_be_written_as_a_unicode_escape() {
-  up_setup
-  usage_out 'Current week (all models): 41% used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
+  # a quote, a backslash, a slash, a tab, a unicode-escaped middle dot, an emoji written as a surrogate pair, a raw UTF-8 dot
+  usage_out 'say \"hi\" \\ a\/b\tc · 😀 · end\n\nlast'
   hook
-  t_contains "$(body)" '"used_percent":41,"resets_at":"2026-11-03T03:59:00Z"'
+  t_eq 1 "$(t_calls)"
+  t_eq "$(want_body 'say \"hi\" \\ a\/b\tc · 😀 · end\n\nlast')" "$(body)"
+  same_text "$STUB_OUTPUT" "$(body_file)" || t_fail "usage_raw differs from result"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$(body_file)" || t_fail "the body is not valid JSON"
+  fi
 }
 
-# resets_case NOW_ISO RESET_TEXT WANT ("" = a sample without resets_at)
-resets_case() {
-  fresh_hour
-  export AIONAS_NOW; AIONAS_NOW=$(epoch_of "$1")
-  usage_out "Current week (all models): 41% used · resets $2"
-  local before; before=$(t_calls)
+test_the_text_is_not_parsed_by_the_plugin() {
+  up_setup
+  # not the weekly line, a different language, no percent: all sent as they are
+  usage_out 'Something new: 41% of the week\nCurrent session: 3% used · resets 8:00am (UTC)'
   hook
-  t_eq $((before + 1)) "$(t_calls)" "a sample is always sent: $2"
-  t_contains "$(body)" '"used_percent":41' "$2"
-  t_eq "$3" "$(resets_sent)" "$2 at $1"
+  t_eq 1 "$(t_calls)" "sent whole"
+  t_eq "$(want_body 'Something new: 41% of the week\nCurrent session: 3% used · resets 8:00am (UTC)')" "$(body)"
+  t_eq 0 "$(counter)"
 }
 
-test_resets_at_is_the_local_wall_time_in_the_named_zone() {
+test_only_a_successful_usage_local_command_is_sent() {
   up_setup
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Asia/Jerusalem)' 2026-11-03T03:59:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 12:00am (America/New_York)' 2026-11-03T05:00:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 2 at 12:30pm (America/New_York)' 2026-11-02T17:30:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 6pm (Asia/Jerusalem)' 2026-11-03T16:00:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 9:05PM (Asia/Jerusalem)' 2026-11-03T19:05:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 2 at 3:00pm (UTC)' 2026-11-02T15:00:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 9:00am (America/Argentina/Buenos_Aires)' 2026-11-03T12:00:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Etc/GMT+5)' 2026-11-03T10:59:00Z
+  local n=0
+  check_nothing() {
+    n=$((n + 1)); fresh_hour; hook
+    t_eq "$n" "$(runs)" "$1"
+    t_eq 0 "$(t_calls)" "$1"
+    t_eq 0 "$(counter)" "$1: not a too-large result"
+  }
+  usage_out 'Current week (all models): 41% used' cost
+  check_nothing "local_command is not usage"
+  usage_out 'Current week (all models): 41% used' usage true
+  check_nothing "is_error true"
+  usage_out 'Current week (all models): 41% used' usage '"false"'
+  check_nothing "is_error is the string false"
+  usage_out 'Current week (all models): 41% used' usage null
+  check_nothing "is_error null"
+  printf '{"local_command":"usage","result":"Current week (all models): 41%% used"}' >"$T_ROOT/noerr"; export STUB_OUTPUT=$T_ROOT/noerr
+  check_nothing "no is_error at all"
+  printf '{"is_error":false,"result":"Current week (all models): 41%% used"}' >"$T_ROOT/nolc"; export STUB_OUTPUT=$T_ROOT/nolc
+  check_nothing "no local_command"
+  printf '{"is_error":false,"local_command":1,"result":"x"}' >"$T_ROOT/lcnum"; export STUB_OUTPUT=$T_ROOT/lcnum
+  check_nothing "local_command is not a string"
+  printf 'not json at all\n' >"$T_ROOT/notjson"; export STUB_OUTPUT=$T_ROOT/notjson
+  check_nothing "not JSON"
+  printf '{"is_error":false,"local_command":"usage","result":' >"$T_ROOT/trunc"; export STUB_OUTPUT=$T_ROOT/trunc
+  check_nothing "truncated JSON"
+  printf '{"is_error":false,"local_command":"usage","result":["Current week (all models): 41%% used"]}' >"$T_ROOT/arr"; export STUB_OUTPUT=$T_ROOT/arr
+  check_nothing "result is not a string"
+  printf '{"is_error":false,"local_command":"usage"}' >"$T_ROOT/nores"; export STUB_OUTPUT=$T_ROOT/nores
+  check_nothing "no result"
+  printf '{"nested":{"is_error":false,"local_command":"usage","result":"Current week (all models): 41%% used"}}' >"$T_ROOT/nest"; export STUB_OUTPUT=$T_ROOT/nest
+  check_nothing "keys must be top level"
+  usage_out ''
+  check_nothing "an empty result has nothing to keep"
+  printf '{"is_error":false,"local_command":"usage","result":"a\001b"}' >"$T_ROOT/ctl"; export STUB_OUTPUT=$T_ROOT/ctl
+  check_nothing "a raw control character is not valid JSON text"
+  usage_out 'Current week (all models): 41% used'
+  export STUB_MODE=exit1
+  check_nothing "the child failed"
+  unset STUB_MODE
+  # and the same output with success sends
+  fresh_hour; hook
+  t_eq 1 "$(t_calls)"
 }
 
-test_resets_at_year_follows_the_clock() {
+test_a_result_that_is_not_valid_utf8_is_refused_and_counted() {
   up_setup
-  resets_case 2026-12-30T00:00:00Z 'Jan 2 at 3:00am (UTC)' 2027-01-02T03:00:00Z
-  resets_case 2026-12-30T00:00:00Z 'Dec 31 at 3:00am (UTC)' 2026-12-31T03:00:00Z
-  resets_case 2027-01-01T01:00:00Z 'Jan 3 at 3:00am (UTC)' 2027-01-03T03:00:00Z
-  resets_case 2028-02-27T00:00:00Z 'Feb 29 at 3:00am (UTC)' 2028-02-29T03:00:00Z
-}
-
-test_resets_at_follows_daylight_saving_in_that_zone() {
-  up_setup
-  # US clocks went back on 2026-11-01 and forward on 2026-03-08.
-  resets_case 2026-10-30T00:00:00Z 'Nov 2 at 12:00pm (America/New_York)' 2026-11-02T17:00:00Z
-  resets_case 2026-10-30T00:00:00Z 'Oct 31 at 12:00pm (America/New_York)' 2026-10-31T16:00:00Z
-  resets_case 2026-03-07T00:00:00Z 'Mar 9 at 3:00am (America/New_York)' 2026-03-09T07:00:00Z
-  resets_case 2026-03-07T00:00:00Z 'Mar 8 at 2:30am (America/New_York)' ""
-  # The hour that happens twice (clocks go back): which of the two instants is
-  # chosen depends on the side of UTC. West of it (New York) the first, east of
-  # it (London) the second. Pinned as the current behaviour, not as a rule.
-  resets_case 2026-10-30T00:00:00Z 'Nov 1 at 1:30am (America/New_York)' 2026-11-01T05:30:00Z
-  resets_case 2026-10-23T00:00:00Z 'Oct 25 at 1:30am (Europe/London)' 2026-10-25T01:30:00Z
-}
-
-test_the_computers_own_timezone_does_not_matter() {
-  up_setup
-  export TZ=Pacific/Auckland
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Asia/Jerusalem)' 2026-11-03T03:59:00Z
-  export TZ=America/Los_Angeles
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Asia/Jerusalem)' 2026-11-03T03:59:00Z
-}
-
-test_resets_at_is_left_out_when_it_cannot_be_trusted() {
-  up_setup
-  local z
-  # an unknown zone name: date would silently use UTC
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Mars/Olympus)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Asia/Nowhere)' ""
-  # not a zone name at all
-  for z in '../../etc/passwd' 'UTC; touch x' '' 'Asia/Jerusalem/a/b/c' '$(id)' 'Asia Jerusalem' '/etc/localtime' 'asia//jerusalem'; do
-    resets_case 2026-11-01T00:00:00Z "Nov 3 at 5:59am ($z)" ""
+  local f
+  # valid multi-byte text (middle dot, Hebrew) is still sent
+  usage_out 'Top plugins: a · b שלום'
+  hook
+  t_eq 1 "$(t_calls)" "valid multi-byte text is sent"
+  t_eq 0 "$(bad_text_counter)"
+  local bad
+  for bad in '\377' '\300\257' '\200' '\302' '\355\240\200' '\360\200\200\200' '\364\220\200\200' 'ok\342\202'; do
+    fresh_hour
+    f=$(mktemp "$T_ROOT/bad.XXXXXX")
+    { printf '{"is_error":false,"local_command":"usage","result":"x'; printf "$bad"; printf '"}\n'; } >"$f"
+    export STUB_OUTPUT=$f
+    hook
+    t_eq 1 "$(t_calls)" "invalid UTF-8 $bad: nothing sent"
   done
-  # not the English 12-hour form
-  resets_case 2026-11-01T00:00:00Z '3 Nov at 5:59am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 17:59 (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 13:00pm (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 0:30am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:75am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am Asia/Jerusalem' ""
-  resets_case 2026-11-01T00:00:00Z 'Noz 3 at 5:59am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'soon' ""
-  # an impossible date
-  resets_case 2026-02-01T00:00:00Z 'Feb 30 at 5:59am (Asia/Jerusalem)' ""
-  resets_case 2026-02-01T00:00:00Z 'Feb 29 at 5:59am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 0 at 5:59am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 32 at 5:59am (Asia/Jerusalem)' ""
-  # not inside the next 8 days: the past, now, and too far ahead
-  resets_case 2026-11-01T00:00:00Z 'Oct 31 at 5:59am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 1 at 2:00am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Nov 9 at 2:01am (Asia/Jerusalem)' ""
-  resets_case 2026-11-01T00:00:00Z 'Dec 20 at 5:59am (Asia/Jerusalem)' ""
+  t_eq 8 "$(bad_text_counter)" "usage_probe_bad_text"
+  t_eq 0 "$(counter)" "not a too-large result"
+  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
 }
 
-test_the_reset_window_edges() {
+test_only_valid_json_escapes_are_sent() {
   up_setup
-  resets_case 2026-11-01T00:00:00Z 'Nov 1 at 2:00am (UTC)' 2026-11-01T02:00:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 9 at 12:00am (UTC)' 2026-11-09T00:00:00Z
-  resets_case 2026-11-01T00:00:00Z 'Nov 1 at 12:00am (UTC)' ""
+  local ok bad n=0
+  for ok in '\"' '\\' '\/' '\b' '\f' '\n' '\r' '\t' '·' 'א' '\\n'; do
+    fresh_hour; usage_out "a${ok}b"
+    hook
+    n=$((n + 1))
+    t_eq "$n" "$(t_calls)" "valid escape $ok is sent"
+  done
+  t_eq 0 "$(bad_text_counter)"
+  local c=0
+  for bad in '\x' '\u12' '\u12g4' '\u123z' '\a' '\0' "\\'" '\U00b7' '\\\q'; do
+    fresh_hour; usage_out "a${bad}b"
+    hook
+    c=$((c + 1))
+    t_eq "$n" "$(t_calls)" "bad escape $bad: nothing sent"
+    t_eq "$c" "$(bad_text_counter)" "usage_probe_bad_text after $bad"
+  done
+}
+
+test_the_size_limit_is_32_kib_of_decoded_text() {
+  up_setup
+  local f
+  # exactly 32768 bytes: sent
+  usage_out "$(head -c 32768 /dev/zero | tr '\0' a)"
+  hook
+  t_eq 1 "$(t_calls)" "32768 bytes is sent"
+  t_eq 0 "$(counter)"
+  # one byte more: not sent, counted
+  fresh_hour; usage_out "$(head -c 32769 /dev/zero | tr '\0' a)"
+  hook
+  t_eq 1 "$(t_calls)" "32769 bytes is not sent"
+  t_eq 1 "$(counter)" "usage_probe_too_large"
+  # 33 KiB
+  fresh_hour; usage_out "$(head -c 33792 /dev/zero | tr '\0' a)"
+  hook
+  t_eq 1 "$(t_calls)" "33 KiB is not sent"
+  t_eq 2 "$(counter)"
+  # escapes count as the text they stand for: 20000 "\n" is 20000 bytes, sent
+  fresh_hour; usage_out "$(awk 'BEGIN { for (i = 0; i < 20000; i++) printf "\\n" }')"
+  hook
+  t_eq 2 "$(t_calls)" "20000 newlines written as escapes are 20000 bytes"
+  t_eq 2 "$(counter)"
+  # a middle dot is two bytes: 16400 of them are 32800 bytes
+  fresh_hour; usage_out "$(awk 'BEGIN { for (i = 0; i < 16400; i++) printf "·" }')"
+  hook
+  t_eq 2 "$(t_calls)" "multi-byte text is measured in bytes"
+  t_eq 3 "$(counter)"
+  # never through the gateway's counter list
+  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
+  t_lacks "$(cat "$T_PLUGIN/lib/catalog.sh")" usage_probe "catalog.sh stays closed"
+}
+
+test_there_is_no_unparsed_counter_and_no_parser_left() {
+  up_setup
+  usage_out 'nope' usage true
+  hook
+  hook
+  t_not test -e "$(aionas_savings_dir)/counters/usage_probe_unparsed"
+  t_not test -e "$T_PLUGIN/lib/usage-probe.awk"
+  t_not grep -rn -e unparsed -e usage-probe.awk -e time.awk -e zoneinfo -e aionas_up_resets -e aionas_up_pct_ok "$T_PLUGIN/lib/usage-probe.sh" "$T_PLUGIN/hooks/usage-probe.sh"
+}
+
+test_claude_version_is_sent_only_when_the_path_already_names_it() {
+  up_setup
+  # claude on PATH: nothing names the version, no extra run to ask
+  hook
+  t_lacks "$(body)" claude_version
+  t_eq 1 "$(runs)" "no --version run"
+  # the Desktop bundle: the version folder
+  rm -f "$STUB/claude"; as_mac
+  install_stub "$(desktop 2.1.308 a93ded4b1b47)"
+  fresh_hour; hook
+  t_eq 2 "$(runs)" "still one run per probe"
+  t_eq "$(want_body "$(raw_of "$FIX/usage-2.1.311-real-capture.json")" 2.1.308)" "$(body)"
+  # the VS Code extension: the folder name
+
+  rm -f "$(desktop 2.1.308 a93ded4b1b47)"
+  install_stub "$(vscode 2.1.100-darwin-arm64)"
+  fresh_hour; hook
+  t_contains "$(body)" '"claude_version":"2.1.100",'
+  t_lacks "$(body)" "darwin"
+  t_eq "" "$(cat "$STUB_LOG/forbidden" 2>/dev/null)"
 }
 
 test_no_new_tool_runs_from_path() {
   up_setup
-  resets_case 2026-11-01T00:00:00Z 'Nov 3 at 5:59am (Asia/Jerusalem)' 2026-11-03T03:59:00Z
+  hook
+  t_eq 1 "$(t_calls)"
   t_eq "" "$(cat "$STUB_LOG/forbidden" 2>/dev/null)"
 }
-
 test_a_fresh_status_line_figure_means_no_probe() {
   up_setup
   local tap="$(agent)/state/plan-usage/claude.last"
@@ -406,10 +414,25 @@ test_a_fresh_status_line_figure_means_no_probe() {
   printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 100)) >"$tap"
   hook
   t_eq 0 "$(runs)" "figure 100 s old"
-  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 3599)) >"$tap"
-  hook; t_eq 0 "$(runs)" "figure 3599 s old"
-  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 3600)) >"$tap"
-  hook; t_eq 1 "$(runs)" "figure exactly an hour old"
+  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 14399)) >"$tap"
+  hook; t_eq 0 "$(runs)" "figure 14399 s old"
+  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - 14400)) >"$tap"
+  hook; t_eq 1 "$(runs)" "figure exactly 4 hours old"
+}
+
+test_the_four_hour_boundary_for_the_stamp_and_for_the_tap() {
+  up_setup
+  hook; t_eq 1 "$(runs)" "first start probes"
+  export AIONAS_NOW=$((NOW0 + 3 * 3600 + 59 * 60)); hook
+  t_eq 1 "$(runs)" "last probe 3 h 59 min ago: no probe"
+  export AIONAS_NOW=$((NOW0 + 4 * 3600 + 60)); hook
+  t_eq 2 "$(runs)" "last probe 4 h 01 min ago: probe"
+  local tap="$(agent)/state/plan-usage/claude.last"
+  mkdir -p "$(dirname "$tap")"
+  fresh_hour; export AIONAS_NOW=$NOW0
+  printf '41|%s|%s' $((NOW0 + 86400)) $((NOW0 - (3 * 3600 + 59 * 60))) >"$tap"
+  local before; before=$(runs)
+  hook; t_eq "$before" "$(runs)" "tap figure 3 h 59 min old: no probe"
 }
 
 test_a_stale_or_unreadable_status_line_figure_does_not_stop_the_probe() {
@@ -632,10 +655,10 @@ test_a_hung_child_is_stopped_and_nothing_is_sent() {
   t_eq 1 "$(runs)"
   ! alive "$(cat "$STUB_LOG/run.1/pid")" || t_fail "a child that ignores TERM survived"
   t_eq 0 "$(t_calls)" "never parse partial output"
-  t_eq 0 "$(counter)" "a timeout is not an unparsed result"
+  t_eq 0 "$(counter)" "a timeout is not a too-large result"
   t_eq "" "$(find "$(pdir)" -mindepth 1)"
   t_not test -d "$(aionas_savings_dir)/locks/usage-probe.lock"
-  t_eq "$NOW0" "$(cat "$(stamp)")" "a hung start is not retried before the hour is over"
+  t_eq "$NOW0" "$(cat "$(stamp)")" "a hung start is not retried before the 4 hours are over"
 }
 
 test_a_timeout_kills_the_whole_process_group() {
@@ -659,6 +682,7 @@ test_output_over_the_cap_stops_the_child_and_sends_nothing() {
   [ "$w" -lt 1048576 ] 2>/dev/null || t_fail "the child wrote [$w] bytes before it was stopped"
   t_ok test $((t1 - t0)) -le 4
   t_eq 0 "$(t_calls)" "nothing is sent"
+  t_eq 1 "$(counter)" "counted as too large"
   ! alive "$(cat "$STUB_LOG/run.1/pid")" || t_fail "the child survived"
   t_eq "" "$(find "$(pdir)" -mindepth 1)"
   t_not test -d "$(aionas_savings_dir)/locks/usage-probe.lock"

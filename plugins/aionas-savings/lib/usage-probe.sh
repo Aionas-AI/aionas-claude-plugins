@@ -1,23 +1,26 @@
-# aionas-savings: the usage probe (AIO-892, W25P-P3). Sourced by
+# aionas-savings: the usage probe (AIO-892, W25P-P3 and P3b). Sourced by
 # hooks/usage-probe.sh only (not by aionas.sh). POSIX sh; also bash 3.2 and Git
 # Bash. A member who runs Claude Code in Claude Desktop or the VS Code
 # extension never renders the status line, so the status-line tap sends no
-# weekly figure. This runs Claude Code's own /usage command, once an hour, and
-# sends the "Current week (all models)" percent and reset time.
+# weekly figure. This runs Claude Code's own /usage command, once every 4 hours, and
+# sends its whole text to the organization's own gateway, which reads the
+# figure out of it. The plugin does not parse the text.
 #
-# Privacy: Claude Code fetches the figure with its own login; Aionas never reads
-# a token. Only the percent and the reset instant are sent: never the text of
-# the result, never the zone name, never a prompt.
+# Privacy (the owner's ruling): the full text of the result goes to the
+# organization's gateway, including Claude Code's own "what's contributing"
+# section: local folder names, skill, sub-agent and MCP names, request counts.
+# Prompts and replies never do. Claude Code fetches the figures with its own
+# login; Aionas never reads a token.
 # The one program run from PATH is claude. The child is started by a plain exec:
 # no env, no timeout and no perl, which a project could shadow on PATH.
 
 # The probe runs at most this often per computer (stamp), and is skipped when
 # the status-line tap stored a weekly figure this recently.
-AIONAS_UP_INTERVAL=3600
-# A /usage result larger than this is not read.
+AIONAS_UP_INTERVAL=14400
+# Output of the child larger than this is not read (the child is stopped).
 AIONAS_UP_MAX_BYTES=65536
-# A reset time only counts when it is in the next 8 days.
-AIONAS_UP_RESET_WINDOW=691200
+# A result text (decoded, in bytes) larger than this is not sent.
+AIONAS_UP_MAX_RESULT=32768
 # Seconds the child gets (the test seam AIONAS_USAGE_PROBE_TIMEOUT may only lower it).
 AIONAS_UP_TIMEOUT=20
 # UNVERIFIED (no Claude extension is installed on the machine this was built
@@ -26,7 +29,6 @@ AIONAS_UP_TIMEOUT=20
 # A wrong guess finds nothing, which is safe: no binary means nothing happens.
 AIONAS_UP_VSCODE_ROOTS=".vscode/extensions .vscode-insiders/extensions"
 AIONAS_UP_VSCODE_REL="resources/native-binary"
-AIONAS_UP_ZONEINFO=/usr/share/zoneinfo
 
 _up_pid=""
 _up_out=""
@@ -35,7 +37,7 @@ _up_resp=""
 _up_lockheld=""
 
 # aionas_up_tap_fresh NOW: exit 0 when the status-line tap stored a figure less
-# than an hour ago (state/plan-usage/claude.last is "pct|reset|at").
+# than 4 hours ago (state/plan-usage/claude.last is "pct|reset|at").
 aionas_up_tap_fresh() {
   _uf_f="$(aionas_agent_dir)/state/plan-usage/claude.last"
   [ -f "$_uf_f" ] || return 1
@@ -46,7 +48,7 @@ aionas_up_tap_fresh() {
   [ "$_uf_d" -ge 0 ] && [ "$_uf_d" -lt "$AIONAS_UP_INTERVAL" ]
 }
 
-# aionas_up_stamp_fresh NOW: exit 0 when a probe started less than an hour ago.
+# aionas_up_stamp_fresh NOW: exit 0 when a probe started less than 4 hours ago.
 aionas_up_stamp_fresh() {
   _us_t=$(cat "$(aionas_savings_dir)/usage-probe.last" 2>/dev/null)
   aionas_is_uint "${_us_t:-x}" || return 1
@@ -72,7 +74,7 @@ aionas_up_newest_first() {
 # file (Desktop's own mark), else "U<TAB>path". Anything with a symlink on the
 # way is left out: the version folder, the build folder (or <X.Y.Z> itself for
 # the second layout), claude.app, Contents, MacOS and the binary. A symlink
-# there could point the hourly run at a program the member never installed.
+# there could point the 4-hourly run at a program the member never installed.
 aionas_up_desktop_list() {
   _dl_base="$(aionas_home)/Library/Application Support/Claude/claude-code"
   for _dl_v in $(ls -1 "$_dl_base" 2>/dev/null | grep -E '^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$' | aionas_up_newest_first); do
@@ -129,67 +131,64 @@ aionas_up_iso() {
   date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
 }
 
-# aionas_up_offset ZONE EPOCH: the zone's offset from UTC at EPOCH, in seconds
-# (east positive). BSD date takes -r EPOCH; GNU date takes -d @EPOCH (its -r
-# wants a file, which fails). The caller checks the zone exists first: an
-# unknown TZ silently means UTC.
-aionas_up_offset() {
-  _uo=$(TZ="$1" date -r "$2" +%z 2>/dev/null)
-  case "$_uo" in [+-][0-9][0-9][0-9][0-9]) ;; *) _uo=$(TZ="$1" date -d "@$2" +%z 2>/dev/null) ;; esac
-  case "$_uo" in [+-][0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
-  _uo_s=${_uo%????}
-  _uo_h=${_uo#?}; _uo_m=${_uo_h#??}; _uo_h=${_uo_h%??}
-  _uo_h=${_uo_h#0}; _uo_m=${_uo_m#0}
-  _uo_v=$((${_uo_h:-0} * 3600 + ${_uo_m:-0} * 60))
-  if [ "$_uo_s" = - ]; then _uo_v=$((0 - _uo_v)); fi
-  printf '%s\n' "$_uo_v"
+# aionas_up_bin_version PATH: the Claude Code version the folder names on the
+# way to the binary, when it does: Claude Desktop's
+# .../claude-code/<X.Y.Z>/..., or the VS Code extension's
+# anthropic.claude-code-<X.Y.Z>[-<platform>]/... . Nothing is run to find out;
+# a binary found on PATH has no such folder, and no version is printed for it.
+aionas_up_bin_version() {
+  printf '%s\n' "$1" | awk '
+    function num(t,   n) {
+      if (!match(t, /^[0-9]+\.[0-9]+\.[0-9]+/)) return ""
+      n = substr(t, 1, RLENGTH)
+      if (RLENGTH > 20) return ""
+      return n
+    }
+    {
+      if ((i = index($0, "/claude-code/")) > 0) v = num(substr($0, i + 13))
+      else if ((i = index($0, "/anthropic.claude-code-")) > 0) v = num(substr($0, i + 23))
+      else v = ""
+      if (v != "") print v
+    }'
 }
 
-# aionas_up_resets ZONE WALL1 WALL2 NOW: print the reset instant as RFC 3339
-# UTC, or print nothing (exit 1). A wall time (seconds, as if UTC) becomes an
-# instant with the zone's offset, found by iterating and re-checked at the
-# result (daylight saving: a time that does not exist is dropped). A wall time
-# that happens twice (clocks go back) is NOT resolved on purpose: the first guess
-# is the zone's offset at the wall time read as UTC, so zones west of UTC (New
-# York 1:30am on the fall-back day) get the first occurrence and zones east of
-# UTC (Europe/London 1:30am) get the second, up to one hour apart once a year.
-# Only an instant after NOW and within 8 days is kept.
-aionas_up_resets() {
-  [ -n "$1" ] || return 1
-  [ -f "$AIONAS_UP_ZONEINFO/$1" ] || return 1
-  for _ur_w in $2 $3; do
-    _ur_o0=$(aionas_up_offset "$1" "$_ur_w") || continue
-    _ur_o1=$(aionas_up_offset "$1" $((_ur_w - _ur_o0))) || continue
-    _ur_e=$((_ur_w - _ur_o1))
-    _ur_o2=$(aionas_up_offset "$1" "$_ur_e") || continue
-    [ "$_ur_o2" = "$_ur_o1" ] || continue
-    [ "$_ur_e" -gt "$4" ] && [ "$_ur_e" -le $(($4 + AIONAS_UP_RESET_WINDOW)) ] || continue
-    aionas_up_iso "$_ur_e"
-    return 0
-  done
-  return 1
-}
-
-# aionas_up_pct_ok VALUE: the percent as the parser prints it (digits and at
-# most one fraction), 0 to 100.
-aionas_up_pct_ok() {
-  case "$1" in '' | *[!0-9.]* | .* | *. | *.*.*) return 1 ;; esac
-  case "$1" in 100 | [0-9] | [0-9][0-9] | [0-9].[0-9]* | [0-9][0-9].[0-9]*) return 0 ;; esac
-  return 1
-}
-
-# aionas_up_unparsed: count one result nobody could read. A local number under
-# savings/counters, NOT the queue: the gateway's counter list does not know this
-# name yet and rejects the whole batch (and the flush then drops every pending
-# row), so it never goes through aionas_counter_inc.
-aionas_up_unparsed() {
-  _un_d="$(aionas_savings_dir)/counters"
-  aionas_mkdir "$_un_d" || return 0
-  _un_n=$(cat "$_un_d/usage_probe_unparsed" 2>/dev/null)
-  aionas_is_uint "${_un_n:-x}" || _un_n=0
-  [ "$_un_n" -lt 1000000000 ] || return 0
-  printf '%s\n' $((_un_n + 1)) | aionas_write_atomic "$_un_d/usage_probe_unparsed"
+# aionas_up_count NAME: count one result nobody sent. A local number under
+# savings/counters, NOT the queue: the gateway's counter list does not know
+# these names and rejects the whole batch (and the flush then drops every
+# pending row), so it never goes through aionas_counter_inc.
+aionas_up_count() {
+  _tl_d="$(aionas_savings_dir)/counters"
+  aionas_mkdir "$_tl_d" || return 0
+  _tl_n=$(cat "$_tl_d/$1" 2>/dev/null)
+  aionas_is_uint "${_tl_n:-x}" || _tl_n=0
+  [ "$_tl_n" -lt 1000000000 ] || return 0
+  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/$1"
   return 0
+}
+aionas_up_too_large() { aionas_up_count usage_probe_too_large; }
+aionas_up_bad_text() { aionas_up_count usage_probe_bad_text; }
+
+# aionas_up_utf8_ok: stdin is one line of bytes; success only if it is valid
+# UTF-8 (shortest forms, no surrogates, nothing above U+10FFFF). tr maps every
+# byte to a one-letter class, then one anchored pattern checks the sequence.
+aionas_up_utf8_ok() {
+  LC_ALL=C tr '\000-\177' a 2>/dev/null |
+    LC_ALL=C tr '\200-\217' p | LC_ALL=C tr '\220-\237' q | LC_ALL=C tr '\240-\277' r |
+    LC_ALL=C tr '\302-\337' 2 | LC_ALL=C tr '\340' A | LC_ALL=C tr '\341-\354\356\357' 3 |
+    LC_ALL=C tr '\355' D | LC_ALL=C tr '\360' F | LC_ALL=C tr '\361-\363' 4 | LC_ALL=C tr '\364' G |
+    LC_ALL=C awk '{ ok = ($0 ~ /^(a|2[pqr]|3[pqr][pqr]|Ar[pqr]|D[pq][pqr]|F[qr][pqr][pqr]|4[pqr][pqr][pqr]|Gp[pqr][pqr])*$/) } END { exit !ok }'
+}
+
+# aionas_up_escapes_ok: stdin is the raw JSON string text; success only if every
+# backslash starts one of the JSON escapes (\" \\ \/ \b \f \n \r \t, or \u and
+# exactly four hex digits). Valid escapes are removed left to right, so an
+# escaped backslash followed by a letter is read correctly; any backslash left
+# over is a bad escape.
+aionas_up_escapes_ok() {
+  awk '{
+    gsub(/\\(["\\\/bfnrt]|u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])/, "")
+    if (index($0, "\\") > 0) bad = 1
+  } END { exit bad }'
 }
 
 # aionas_up_stop_group: stop the child and everything it started. The child
@@ -283,7 +282,7 @@ EOF
   (umask 077; set -C; : >"$_up_out") 2>/dev/null || { _up_out=""; return 0; }
 
   # The stamp goes down BEFORE the child starts: a hung or failed run is not
-  # retried before the hour is over.
+  # retried before the 4 hours are over.
   printf '%s\n' "$_r_now" | aionas_write_atomic "$(aionas_savings_dir)/usage-probe.last" || return 0
 
   # Job control makes the background child the leader of its own process group
@@ -308,11 +307,11 @@ EOF
       return 0
     fi
     # Too much output: stop it now, so a flooding child cannot fill the disk
-    # before the timeout. Counted like any other unreadable result.
+    # before the timeout. Counted as a result that was too large.
     _r_size=$(wc -c <"$_up_out" 2>/dev/null | tr -d ' ')
     if aionas_is_uint "${_r_size:-x}" && [ "$_r_size" -gt "$AIONAS_UP_MAX_BYTES" ]; then
       aionas_up_cleanup
-      aionas_up_unparsed
+      aionas_up_too_large
       return 0
     fi
     sleep 0.2 2>/dev/null || sleep 1
@@ -322,25 +321,38 @@ EOF
   _up_pid=""
 
   _r_size=$(wc -c <"$_up_out" 2>/dev/null | tr -d ' ')
-  if [ "$_r_rc" != 0 ] || ! aionas_is_uint "${_r_size:-x}" || [ "$_r_size" -gt "$AIONAS_UP_MAX_BYTES" ]; then
-    aionas_up_unparsed; return 0
-  fi
-  _r_flat=$(aionas_json_flatten "$_up_out" 2>/dev/null) || { aionas_up_unparsed; return 0; }
+  aionas_is_uint "${_r_size:-x}" || return 0
+  if [ "$_r_size" -gt "$AIONAS_UP_MAX_BYTES" ]; then aionas_up_too_large; return 0; fi
+  [ "$_r_rc" = 0 ] || return 0
+  # Only a successful /usage is sent: local_command "usage", is_error false and
+  # a result string, all at the top level. The text itself is not looked at.
+  _r_flat=$(aionas_json_flatten "$_up_out" 2>/dev/null) || return 0
   if [ "$(printf '%s\n' "$_r_flat" | aionas_json_get local_command)" != usage ] ||
     [ "$(printf '%s\n' "$_r_flat" | aionas_json_type local_command)" != s ] ||
+    [ "$(printf '%s\n' "$_r_flat" | aionas_json_type is_error)" != b ] ||
+    [ "$(printf '%s\n' "$_r_flat" | aionas_json_get is_error)" != false ] ||
     [ "$(printf '%s\n' "$_r_flat" | aionas_json_type result)" != s ]; then
-    aionas_up_unparsed; return 0
+    return 0
   fi
-  _r_now=$(aionas_now)
-  _r_parsed=$(printf '%s\n' "$_r_flat" | aionas_json_get result | aionas_json_unescape |
-    awk -v now="$_r_now" -f "$AIONAS_LIB/time.awk" -f "$AIONAS_LIB/usage-probe.awk") || _r_parsed=""
+  # The result as Claude Code wrote it: the raw JSON text between the quotes
+  # (escapes kept), which goes into the body as it is.
+  _r_raw=$(printf '%s\n' "$_r_flat" | aionas_json_get result)
   _r_flat=""
-  if [ -z "$_r_parsed" ]; then aionas_up_unparsed; return 0; fi
-  IFS="$(printf '\037')" read -r _r_pct _r_zone _r_w1 _r_w2 <<EOF
-$_r_parsed
-EOF
-  aionas_up_pct_ok "$_r_pct" || { aionas_up_unparsed; return 0; }
-  _r_reset=$(aionas_up_resets "$_r_zone" "$_r_w1" "$_r_w2" "$_r_now")
+  [ -n "$_r_raw" ] || return 0
+  # A raw control character is not valid inside a JSON string: send nothing.
+  [ -z "$(printf '%s' "$_r_raw" | LC_ALL=C tr -d '\040-\377')" ] || return 0
+  # The text must be valid UTF-8 and use only valid JSON escapes: otherwise the
+  # body would not be valid JSON (or not valid text). Send nothing, count it.
+  if ! printf '%s' "$_r_raw" | aionas_up_utf8_ok || ! printf '%s\n' "$_r_raw" | aionas_up_escapes_ok; then
+    aionas_up_bad_text
+    return 0
+  fi
+  # Size of the text itself (escapes decoded), in bytes; the awk adds one newline.
+  _r_len=$(printf '%s\n' "$_r_raw" | aionas_json_unescape | wc -c | tr -d ' ')
+  aionas_is_uint "${_r_len:-x}" || return 0
+  _r_len=$((_r_len - 1))
+  if [ "$_r_len" -gt "$AIONAS_UP_MAX_RESULT" ]; then aionas_up_too_large; return 0; fi
+  _r_now=$(aionas_now)
   _r_observed=$(aionas_up_iso "$_r_now")
   [ -n "$_r_observed" ] || return 0
 
@@ -348,12 +360,13 @@ EOF
   [ -n "$_r_acct" ] && _r_who=",\"account_uuid\":\"$_r_acct\""
   [ -n "$_r_org" ] && _r_who="$_r_who,\"organization_uuid\":\"$_r_org\""
   [ -n "$_r_orgname" ] && _r_who="$_r_who,\"organization_name\":\"$_r_orgname\""
-  _r_win="\"kind\":\"weekly_all\",\"window_minutes\":10080,\"used_percent\":$_r_pct"
-  [ -n "$_r_reset" ] && _r_win="$_r_win,\"resets_at\":\"$_r_reset\""
+  _r_ver=$(aionas_up_bin_version "$_r_bin")
+  [ -n "$_r_ver" ] && _r_who="$_r_who,\"claude_version\":\"$_r_ver\""
   _up_body="$_r_pdir/body.$$"
   _up_resp="$_r_pdir/resp.$$"
-  printf '{"tool":"claude_code","source":"usage_cmd","observed_at":"%s"%s,"windows":[{%s}]}' \
-    "$_r_observed" "$_r_who" "$_r_win" >"$_up_body"
+  printf '{"tool":"claude_code","source":"usage_cmd","observed_at":"%s"%s,"windows":[{"kind":"weekly_all","window_minutes":10080}],"usage_raw":"%s"}' \
+    "$_r_observed" "$_r_who" "$_r_raw" >"$_up_body"
+  _r_raw=""
   aionas_http POST /cc-quota/v1/samples "$_up_body" "$_up_resp" >/dev/null 2>&1
   return 0
 }

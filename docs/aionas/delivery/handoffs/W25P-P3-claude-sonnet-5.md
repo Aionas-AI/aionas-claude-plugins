@@ -16,6 +16,8 @@ completed_at: 2026-11-01
 
 On an enrolled computer, a new async SessionStart hook `usage-probe.sh` runs Claude Code's own `/usage` command at most once an hour (and only when the status-line tap stored no weekly figure in the last hour), reads the `Current week (all models)` line and sends one `usage_cmd` sample (`kind: weekly_all`, `used_percent`, `resets_at` when it can be computed reliably) to `POST /cc-quota/v1/samples`. Observed behaviour, all against a stub `claude` (no real login, no model call, `make test`): the 41% fixture produces exactly one POST whose body is the expected string; a second start in the hour makes no second probe; the child sees `AIONAS_USAGE_PROBE=1`; every hook in `hooks.json` run inside the child does nothing and sends nothing; an unreadable result sends nothing and counts locally.
 
+Interval changed to 4 h in P3b (owner ruling).
+
 ## Scope and exclusions
 
 - Implemented: hook + lib (`hooks/usage-probe.sh`, `lib/usage-probe.sh`, `lib/usage-probe.awk`), the recursion guard (first code line of `lib/aionas.sh`), binary lookup (PATH, Desktop bundle, VS Code extension), parser, reset-time conversion, sample body, local unparsed counter, timeout / TERM handling, tests, fixture, README / CHANGELOG / egress-manifest.
@@ -86,7 +88,7 @@ Only `--version` was run, on the two real binaries. `/usage` was never run again
 | # | Line | Test / status |
 |---|---|---|
 | 1 | one row `usage_cmd`, 41, parsed `resets_at` | `test_fixture_41_sends_exactly_one_usage_cmd_sample` (POST body); the `cc_quota_samples` row is a gateway E2E, deferred |
-| 2 | second start within the hour: stub count 1 | `test_second_session_within_the_hour_does_not_probe_again` |
+| 2 | second start within the hour: stub count 1 | `test_second_session_within_4_hours_does_not_probe_again` |
 | 3 | child sees `AIONAS_USAGE_PROBE=1`; hook log empty | `test_the_child_gets_the_variable_and_exactly_the_documented_command`, `test_every_hook_does_nothing_inside_the_probe_child`, `test_the_same_hooks_do_work_without_the_variable`, `test_aionas_sh_exits_the_sourcing_shell_on_the_variable` |
 | 4 | unknown text: no sample, counter = 1 | `test_unrecognized_text_sends_nothing_and_counts`, `test_only_a_usage_local_command_with_the_all_models_line_is_a_sample` (see Flag 1 for where the counter lives) |
 | 5, 6 | plan-check reasons, T unchanged | gateway, not here |

@@ -32,7 +32,7 @@ entries() {
 test_hooks_json_registers_every_lane_entry() {
   local got
   got=$(entries | awk -F '\037' '{ c = $3; sub(/.*\/hooks\//, "", c); sub(/\\".*/, "", c); print $1 "/" $2 "/" c }' | sort | tr '\n' ' ')
-  t_eq "PostToolUse//output-store.sh PreToolUse/Bash/noisy-guard.sh SessionStart//daily-scan.sh SessionStart//effort-window.sh SessionStart//plan-report.sh SessionStart//policy-sync.sh SessionStart//script-refresh.sh SessionStart//unused-services-notice.sh SessionStart//unused-services.sh SessionStart//write-minimum.sh Stop//counters-flush.sh Stop//handoff-arm.sh UserPromptSubmit//handoff-cancel.sh " "$got"
+  t_eq "PostToolUse//output-store.sh PreToolUse/Bash/noisy-guard.sh SessionStart//daily-scan.sh SessionStart//effort-window.sh SessionStart//plan-report.sh SessionStart//policy-sync.sh SessionStart//script-refresh.sh SessionStart//unused-services-notice.sh SessionStart//unused-services.sh SessionStart//usage-probe.sh SessionStart//write-minimum.sh Stop//counters-flush.sh Stop//handoff-arm.sh UserPromptSubmit//handoff-cancel.sh " "$got"
 }
 
 test_hook_commands_point_at_executable_scripts() {

@@ -2,6 +2,10 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
+## Unreleased (0.5.0)
+
+- **Plan detection reads the member's own tier, knows Ultra, and names the Claude organization** (AIO‑899, AIO‑900, AIO‑901): the plan report uses `userRateLimitTier` (else the organization's) so a Team premium seat is `team_premium`; a tier containing `ultra` is `max_20x` (plan ids are unchanged); every sample also carries `organization_uuid` and a cleaned `organization_name` when Claude Code has them.
+
 ## 0.4.1 (2026-11-01)
 
 **Without the one install, the plugin does nothing.** The repository is public, so anyone can install the plugin by hand. On a computer the one install never enrolled (no alias in `~/.aionas/agent/credential`), every method is off, required ones too: no session context, sub-agents keep the person's own model, no handoff, no output trim, and the band draws nothing. Nothing was sent from such a computer before either; now nothing changes on it. An enrolled computer is unchanged: with no policy cached yet, every method is on as before.

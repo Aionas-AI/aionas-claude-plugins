@@ -90,7 +90,7 @@ Only `--version` was run, on the two real binaries. `/usage` was never run again
 | 3 | child sees `AIONAS_USAGE_PROBE=1`; hook log empty | `test_the_child_gets_the_variable_and_exactly_the_documented_command`, `test_every_hook_does_nothing_inside_the_probe_child`, `test_the_same_hooks_do_work_without_the_variable`, `test_aionas_sh_exits_the_sourcing_shell_on_the_variable` |
 | 4 | unknown text: no sample, counter = 1 | `test_unrecognized_text_sends_nothing_and_counts`, `test_only_a_usage_local_command_with_the_all_models_line_is_a_sample` (see Flag 1 for where the counter lives) |
 | 5, 6 | plan-check reasons, T unchanged | gateway, not here |
-| 7 | live, Desktop-only member on prod | UNVERIFIED (live; needs the release) |
+| 7 | live check of a Desktop-only member after the release | UNVERIFIED (live; needs the release) |
 
 Other spec tests: fresh tap -> no probe (`test_a_fresh_status_line_figure_means_no_probe`, stale / unreadable variants); no binary -> no request; PATH first, Desktop newest by version (2.1.100 over 2.1.99 even when 2.1.99 has the newer mtime), VS Code last, Desktop macOS-only; argv exact and no `--bare`; timeout (TERM-ignoring stub) and a TERM sent to the hook; not enrolled; egress-manifest test passes with the regenerated manifest.
 

@@ -13,11 +13,12 @@ How a change reaches customer computers:
   CI fails when the code and that list disagree.
 - Release tags `aionas-savings-v*` cannot be moved or deleted.
 
-What leaves the computer, beyond numbers and names: once every 4 hours, on a
-computer where Claude Code runs outside the terminal UI, the plugin sends the
-full text of Claude Code's own `/usage` result (at most 32 KiB) to the
+What leaves the computer, beyond numbers and names: at most once every 4 hours,
+on a session start on an enrolled computer signed in with a Claude subscription,
+when the status-line tap has no figure from the last 4 hours (this includes
+terminal users without the tap), the plugin sends the full text of Claude Code's own `/usage` result (at most 32 KiB) to the
 organization's own gateway, by the owner's ruling, so the gateway can read the
 weekly figure and keep the text when it cannot. Besides the usage lines, that
 text has Claude Code's "What's contributing" section: local folder names,
-skill, sub-agent and MCP names, and request counts. Prompts and model replies
+skill, sub-agent, MCP and plugin names (the "Top plugins:" line), and request counts. Prompts and model replies
 never leave. The plugin does not parse the text and never reads a login token.

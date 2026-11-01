@@ -152,18 +152,43 @@ aionas_up_bin_version() {
     }'
 }
 
-# aionas_up_too_large: count one result nobody sent because it was too big. A
-# local number under savings/counters, NOT the queue: the gateway's counter list
-# does not know this name and rejects the whole batch (and the flush then drops
-# every pending row), so it never goes through aionas_counter_inc.
-aionas_up_too_large() {
+# aionas_up_count NAME: count one result nobody sent. A local number under
+# savings/counters, NOT the queue: the gateway's counter list does not know
+# these names and rejects the whole batch (and the flush then drops every
+# pending row), so it never goes through aionas_counter_inc.
+aionas_up_count() {
   _tl_d="$(aionas_savings_dir)/counters"
   aionas_mkdir "$_tl_d" || return 0
-  _tl_n=$(cat "$_tl_d/usage_probe_too_large" 2>/dev/null)
+  _tl_n=$(cat "$_tl_d/$1" 2>/dev/null)
   aionas_is_uint "${_tl_n:-x}" || _tl_n=0
   [ "$_tl_n" -lt 1000000000 ] || return 0
-  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/usage_probe_too_large"
+  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/$1"
   return 0
+}
+aionas_up_too_large() { aionas_up_count usage_probe_too_large; }
+aionas_up_bad_text() { aionas_up_count usage_probe_bad_text; }
+
+# aionas_up_utf8_ok: stdin is one line of bytes; success only if it is valid
+# UTF-8 (shortest forms, no surrogates, nothing above U+10FFFF). tr maps every
+# byte to a one-letter class, then one anchored pattern checks the sequence.
+aionas_up_utf8_ok() {
+  LC_ALL=C tr '\000-\177' a 2>/dev/null |
+    LC_ALL=C tr '\200-\217' p | LC_ALL=C tr '\220-\237' q | LC_ALL=C tr '\240-\277' r |
+    LC_ALL=C tr '\302-\337' 2 | LC_ALL=C tr '\340' A | LC_ALL=C tr '\341-\354\356\357' 3 |
+    LC_ALL=C tr '\355' D | LC_ALL=C tr '\360' F | LC_ALL=C tr '\361-\363' 4 | LC_ALL=C tr '\364' G |
+    LC_ALL=C awk '{ ok = ($0 ~ /^(a|2[pqr]|3[pqr][pqr]|Ar[pqr]|D[pq][pqr]|F[qr][pqr][pqr]|4[pqr][pqr][pqr]|Gp[pqr][pqr])*$/) } END { exit !ok }'
+}
+
+# aionas_up_escapes_ok: stdin is the raw JSON string text; success only if every
+# backslash starts one of the JSON escapes (\" \\ \/ \b \f \n \r \t, or \u and
+# exactly four hex digits). Valid escapes are removed left to right, so an
+# escaped backslash followed by a letter is read correctly; any backslash left
+# over is a bad escape.
+aionas_up_escapes_ok() {
+  awk '{
+    gsub(/\\(["\\\/bfnrt]|u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])/, "")
+    if (index($0, "\\") > 0) bad = 1
+  } END { exit bad }'
 }
 
 # aionas_up_stop_group: stop the child and everything it started. The child
@@ -316,6 +341,12 @@ EOF
   [ -n "$_r_raw" ] || return 0
   # A raw control character is not valid inside a JSON string: send nothing.
   [ -z "$(printf '%s' "$_r_raw" | LC_ALL=C tr -d '\040-\377')" ] || return 0
+  # The text must be valid UTF-8 and use only valid JSON escapes: otherwise the
+  # body would not be valid JSON (or not valid text). Send nothing, count it.
+  if ! printf '%s' "$_r_raw" | aionas_up_utf8_ok || ! printf '%s\n' "$_r_raw" | aionas_up_escapes_ok; then
+    aionas_up_bad_text
+    return 0
+  fi
   # Size of the text itself (escapes decoded), in bytes; the awk adds one newline.
   _r_len=$(printf '%s\n' "$_r_raw" | aionas_json_unescape | wc -c | tr -d ' ')
   aionas_is_uint "${_r_len:-x}" || return 0

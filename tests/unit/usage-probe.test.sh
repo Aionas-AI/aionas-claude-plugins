@@ -44,6 +44,7 @@ agent() { aionas_agent_dir; }
 pdir() { echo "$(agent)/state/usage-probe"; }
 stamp() { echo "$(aionas_savings_dir)/usage-probe.last"; }
 counter() { cat "$(aionas_savings_dir)/counters/usage_probe_too_large" 2>/dev/null || echo 0; }
+bad_text_counter() { cat "$(aionas_savings_dir)/counters/usage_probe_bad_text" 2>/dev/null || echo 0; }
 body() { t_call "$(t_calls)" body; }
 body_file() { echo "$FAKE_CURL_LOG/$(t_calls)/body"; }
 # usage_out RESULT_TEXT [LOCAL_COMMAND [IS_ERROR]]: the stub prints a /usage JSON
@@ -291,6 +292,48 @@ test_only_a_successful_usage_local_command_is_sent() {
   # and the same output with success sends
   fresh_hour; hook
   t_eq 1 "$(t_calls)"
+}
+
+test_a_result_that_is_not_valid_utf8_is_refused_and_counted() {
+  up_setup
+  local f
+  # valid multi-byte text (middle dot, Hebrew) is still sent
+  usage_out 'Top plugins: a · b שלום'
+  hook
+  t_eq 1 "$(t_calls)" "valid multi-byte text is sent"
+  t_eq 0 "$(bad_text_counter)"
+  local bad
+  for bad in '\377' '\300\257' '\200' '\302' '\355\240\200' '\360\200\200\200' '\364\220\200\200' 'ok\342\202'; do
+    fresh_hour
+    f=$(mktemp "$T_ROOT/bad.XXXXXX")
+    { printf '{"is_error":false,"local_command":"usage","result":"x'; printf "$bad"; printf '"}\n'; } >"$f"
+    export STUB_OUTPUT=$f
+    hook
+    t_eq 1 "$(t_calls)" "invalid UTF-8 $bad: nothing sent"
+  done
+  t_eq 8 "$(bad_text_counter)" "usage_probe_bad_text"
+  t_eq 0 "$(counter)" "not a too-large result"
+  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
+}
+
+test_only_valid_json_escapes_are_sent() {
+  up_setup
+  local ok bad n=0
+  for ok in '\"' '\\' '\/' '\b' '\f' '\n' '\r' '\t' '·' 'א' '\\n'; do
+    fresh_hour; usage_out "a${ok}b"
+    hook
+    n=$((n + 1))
+    t_eq "$n" "$(t_calls)" "valid escape $ok is sent"
+  done
+  t_eq 0 "$(bad_text_counter)"
+  local c=0
+  for bad in '\x' '\u12' '\u12g4' '\u123z' '\a' '\0' "\\'" '\U00b7' '\\\q'; do
+    fresh_hour; usage_out "a${bad}b"
+    hook
+    c=$((c + 1))
+    t_eq "$n" "$(t_calls)" "bad escape $bad: nothing sent"
+    t_eq "$c" "$(bad_text_counter)" "usage_probe_bad_text after $bad"
+  done
 }
 
 test_the_size_limit_is_32_kib_of_decoded_text() {

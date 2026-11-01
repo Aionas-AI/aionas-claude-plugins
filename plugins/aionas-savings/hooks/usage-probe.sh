@@ -8,7 +8,7 @@
 # ~/.aionas/agent/state/usage-probe, AIONAS_USAGE_PROBE=1 in its environment)
 # and sends the whole text of its result, as it is, as one usage_cmd sample: the
 # organization's own gateway reads the figure. The text includes Claude Code's
-# "what's contributing" section (folder, skill, sub-agent and MCP names).
+# "what's contributing" section (folder, skill, sub-agent, MCP and plugin names).
 # The child starts every plugin hook again: lib/aionas.sh ends any hook that
 # sources it while AIONAS_USAGE_PROBE is set (including this one), so nothing
 # runs twice. Not enrolled, no claude binary, an API-key login, an error result

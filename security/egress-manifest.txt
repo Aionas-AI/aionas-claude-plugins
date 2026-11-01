@@ -29,10 +29,12 @@ file plugins/aionas-savings/hooks/script-refresh.sh
 file plugins/aionas-savings/hooks/stop-handoff.sh
 file plugins/aionas-savings/hooks/unused-services-notice.sh
 file plugins/aionas-savings/hooks/unused-services.sh
+file plugins/aionas-savings/hooks/usage-probe.sh
 file plugins/aionas-savings/hooks/write-minimum-context.json
 file plugins/aionas-savings/hooks/write-minimum.sh
 file plugins/aionas-savings/lib/aionas.sh
 file plugins/aionas-savings/lib/catalog.sh
+file plugins/aionas-savings/lib/claude-account.sh
 file plugins/aionas-savings/lib/counters.sh
 file plugins/aionas-savings/lib/enroll.sh
 file plugins/aionas-savings/lib/http.sh
@@ -46,6 +48,8 @@ file plugins/aionas-savings/lib/time.awk
 file plugins/aionas-savings/lib/unused-json.awk
 file plugins/aionas-savings/lib/unused-usage.awk
 file plugins/aionas-savings/lib/unused.sh
+file plugins/aionas-savings/lib/usage-probe.awk
+file plugins/aionas-savings/lib/usage-probe.sh
 file plugins/aionas-savings/rules/guard-store.tsv
 file plugins/aionas-savings/tsconfig.json
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\""
@@ -60,6 +64,7 @@ hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/script-refresh.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services-notice.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services.sh\""
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/usage-probe.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/write-minimum.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "modules": ["./mod.tsx"]
 http GET /enroll/v1/savings/policy

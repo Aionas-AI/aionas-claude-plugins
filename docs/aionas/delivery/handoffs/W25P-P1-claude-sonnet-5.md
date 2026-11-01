@@ -64,7 +64,7 @@ Four new tests passed before the change by nature (they pin behavior that must n
 command: bash tests/unit/plan-report.test.sh   (at b95af97)
 actual result: plan-report.test.sh: 18 passed, 0 failed
 command: make test validate
-actual result: see "Unverified claims and blockers" for the recorded final result
+actual result: exit 0. make test: ALL PASSED. make validate: manifest and plugin validation passed, plugin mod tests 44 pass, 0 fail (run at b95af97; the later commit only adds this file)
 ```
 
 ## Success lines that name the plugin
@@ -115,7 +115,7 @@ Success lines that name only the collector, the tap, the gateway, the UI or live
 
 - Unverified: the name cleaner was run only with the awk on this machine (BWK awk 20200816). It uses no gawk-only features and is byte-wise, but mawk and gawk were not available here to confirm.
 - Unverified: behavior against a live gateway (no network calls were made).
-- `make test` result: all unit tests passed (see the final line of the run recorded in the orchestrator's summary). `make validate` needs npx and the npm registry; its recorded result is given in the summary.
+- `make test validate` passed in full (see GREEN evidence).
 - Blocked by: nothing.
 - Required user/customer input: none.
 

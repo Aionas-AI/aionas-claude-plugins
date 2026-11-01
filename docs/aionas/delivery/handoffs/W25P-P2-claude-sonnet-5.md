@@ -116,3 +116,11 @@ Success lines that name only the gateway or the Apps column are not in this pack
 ## Rollback
 
 Revert the feat and test commits. The plugin's own state files `savings/script-refresh.day` and `savings/script-refresh.prevday` are inert once the hook is gone; any `*.prev` left in the tools folder is a copy of the previous script and can be deleted by name.
+
+## Review-fix log (2026-11-01)
+
+Finding 1 [major] S5 test passed without its guard. Fixed in `tests/unit/script-refresh.test.sh`, `test_aio904_names_outside_the_four_or_not_installed_write_nothing`: for every hostile name (`evil.sh`, `../x`, `../../savings/pwn`, `aionas-scan`, `aionas-plan-usage.sh/../evil`, not-installed `.ps1`, empty) the fake gateway now serves valid bytes (matching sha and stamp) under the URL's last segment, and existing files at the resolved targets (`tools/aionas-scan`, `agent/x`, `savings/pwn`) must stay `KEEP`; the test also asserts only the manifest was requested (no download attempted). No hook change.
+
+M9 re-run (replace `aionas_sr_name_ok "$_sr_name" || continue` with `:`): script-refresh.test.sh 30 passed, 1 failed (the S5 test is red). Hook restored; 31/31 green again.
+
+Full evidence re-run: `make test` ALL PASSED; `make validate` 44 pass, 0 fail; `shellcheck -S error -s bash` over plugins and tests exit 0.

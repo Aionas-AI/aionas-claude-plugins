@@ -108,4 +108,32 @@ test_no_remote_sends_no_repository() {
   t_lacks "$(t_call 1 body)" '"repo"'
 }
 
+test_a_session_id_with_path_characters_is_ignored() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  hook "$d" "12345678-../../x-a-b-c"
+  hook "$d" "12345678-1234-1234-1234-12345678901/"
+  t_eq 0 "$(t_calls)"
+  t_eq "" "$(find "$T_ROOT" -name 'x-a-b-c' 2>/dev/null)" "no file outside the state folder"
+}
+
+test_a_remote_not_named_origin_still_names_the_repository() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  git -C "$d" remote add github "git@github.com:acme/billing.git"
+  hook "$d"
+  t_contains "$(t_call 1 body)" '"repo":"billing"'
+}
+
+test_an_inherited_git_dir_never_points_at_another_repository() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d other
+  d=$(repo feat/mine)
+  other=$(repo feat/other)
+  GIT_DIR="$other/.git" hook "$d"
+  t_contains "$(t_call 1 body)" '"branch":"feat/mine"'
+}
+
 t_main "$@"

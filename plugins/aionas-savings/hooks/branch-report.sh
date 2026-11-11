@@ -21,12 +21,18 @@ sid=$(printf '%s\n' "$flat" | aionas_json_get session_id 2>/dev/null) || exit 0
 cwd=$(printf '%s\n' "$flat" | aionas_json_get cwd 2>/dev/null | aionas_json_unescape) || exit 0
 input="" flat=""
 
-# A session id is a UUID (the gateway's own check).
+# A session id is a UUID (the gateway's own check). It names the state file,
+# so nothing but hex digits and four dashes in the UUID places gets through.
+h4='[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]'
+# shellcheck disable=SC2254
 case "$sid" in
-  [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-*-*-*-*) ;;
+  $h4$h4-$h4-$h4-$h4-$h4$h4$h4) ;;
   *) exit 0 ;;
 esac
 [ -n "$cwd" ] && [ -d "$cwd" ] || exit 0
+# Only the folder decides: a GIT_DIR or GIT_WORK_TREE inherited from the
+# session's environment must not point git at another repository.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
 
 branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
 sha=$(git -C "$cwd" rev-parse HEAD 2>/dev/null) || exit 0
@@ -34,8 +40,12 @@ case "$branch" in "" | HEAD) exit 0 ;; esac
 case "$sha" in *[!0-9a-f]* | "") exit 0 ;; esac
 # The repository's bare NAME, worked out here so the remote URL (which can
 # carry a user or a token) never leaves this computer: the last part of the
-# origin remote, without ".git". No remote: no repository is sent.
-repo=$(git -C "$cwd" remote get-url origin 2>/dev/null) || repo=""
+# origin remote (else the first remote), without ".git". No remote: no
+# repository is sent.
+remote=origin
+git -C "$cwd" remote get-url origin >/dev/null 2>&1 || remote=$(git -C "$cwd" remote 2>/dev/null | head -n 1)
+repo=""
+[ -n "$remote" ] && repo=$(git -C "$cwd" remote get-url "$remote" 2>/dev/null)
 repo=${repo%/}
 repo=${repo##*/}
 repo=${repo##*:}

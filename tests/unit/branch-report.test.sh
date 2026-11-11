@@ -84,4 +84,28 @@ test_nothing_when_not_enrolled_or_the_session_is_not_an_id() {
   t_eq 0 "$(t_calls)"
 }
 
+test_sends_the_repository_name_never_the_remote_url() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  git -C "$d" remote add origin "https://dana:SECRET-TOKEN@github.com/acme/gateway.git"
+  hook "$d"
+  t_contains "$(t_call 1 body)" '"repo":"gateway"'
+  t_lacks "$(t_call 1 body)" SECRET-TOKEN "a token in the remote URL never leaves"
+  t_lacks "$(t_call 1 body)" github.com "the remote URL never leaves"
+  local d2
+  d2=$(repo main)
+  git -C "$d2" remote add origin "git@github.com:acme/ui.git"
+  hook "$d2" 2f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b
+  t_contains "$(t_call 2 body)" '"repo":"ui"'
+}
+
+test_no_remote_sends_no_repository() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  hook "$d"
+  t_lacks "$(t_call 1 body)" '"repo"'
+}
+
 t_main "$@"

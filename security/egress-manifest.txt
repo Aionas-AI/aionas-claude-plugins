@@ -8,6 +8,7 @@ file plugins/aionas-savings/commands/aionas-bypass.sh
 file plugins/aionas-savings/commands/aionas-handoff.md
 file plugins/aionas-savings/commands/aionas-xhigh.sh
 file plugins/aionas-savings/hooks/band.tsx
+file plugins/aionas-savings/hooks/branch-report.sh
 file plugins/aionas-savings/hooks/counters-flush.sh
 file plugins/aionas-savings/hooks/daily-scan.sh
 file plugins/aionas-savings/hooks/effort-window.sh
@@ -51,6 +52,7 @@ file plugins/aionas-savings/lib/unused.sh
 file plugins/aionas-savings/lib/usage-probe.sh
 file plugins/aionas-savings/rules/guard-store.tsv
 file plugins/aionas-savings/tsconfig.json
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/branch-report.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/daily-scan.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/effort-window.sh\""
@@ -69,6 +71,7 @@ hook plugins/aionas-savings/hooks/hooks.json "modules": ["./mod.tsx"]
 http GET /enroll/v1/savings/policy
 http GET /enroll/v1/scripts/manifest
 http POST /cc-quota/v1/samples
+http POST /enroll/v1/cc-session-git
 http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run

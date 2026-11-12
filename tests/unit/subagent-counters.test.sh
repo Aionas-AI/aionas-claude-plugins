@@ -82,7 +82,7 @@ test_the_next_flush_body_carries_the_row() {
   t_eq 1 "$(t_calls)"
   t_eq POST "$(t_call 1 method)"
   t_eq https://gw.example.test/enroll/v1/savings/counters "$(t_call 1 url)"
-  t_eq '{"plugin_version":"0.5.0","counters":[{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":2},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"skipped","value":1}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.6.0","counters":[{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":2},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"skipped","value":1}]}' "$(t_call 1 body)"
 }
 
 test_the_hook_list_has_no_new_entry_and_the_mod_is_the_only_caller() {

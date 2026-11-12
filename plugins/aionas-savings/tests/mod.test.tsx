@@ -43,6 +43,7 @@ type World = {
   now: number
   bandReads: () => number
   clock: MockClock
+  sessionId: string
   toasts: string[]
   // Windows only: the bash.exe paths that start (a `-c true` exits 0 there), and the paths recorded for support.
   files: string[]
@@ -91,12 +92,13 @@ function world(on: On, grant: string = 'high'): World {
     now: T0,
     bandReads: () => reads,
     clock: mock.clock(on, { now: T0 * 1000 }),
+    sessionId: 'sess-test-1',
     toasts: [],
     files: [],
     recorded: [],
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'sess-test-1' }))
+  on('session.id', () => ({ value: w.sessionId }))
   on('session.cwd', () => ({ value: '/work/my repo' }))
   on('session.surfaces', () => ({ value: w.surfaces }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }))
@@ -681,6 +683,12 @@ describe('band: chips and the one-click bypass (M3)', () => {
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     await ui.press({ key: 'aionas-compact' })
     expect(compacts).toBe(1)
+    // AIO-1022: while it is pending the button is a dim label; with no new
+    // size the button returns after a few seconds.
+    expect(await ui.find({ key: 'aionas-compact' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'Compacting…' })).toBeDefined()
+    await w.clock.advance(11_000)
+    expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
     await ui.press({ key: 'aionas-later' })
     expect(await ui.find({ key: 'aionas-compact' })).toBeUndefined()
     await measure($, 250000)
@@ -696,6 +704,146 @@ describe('band: chips and the one-click bypass (M3)', () => {
     await measure($, 120000)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: '▲ Context 120K of 1M. Compact recommended.' })).toBeDefined()
+  })
+})
+
+describe('band: /compact once per press, and what it saved (AIO-1022, AIO-1023)', () => {
+  const handoffOn = (w: World) => (w.methods.handoff = { ...(w.methods.handoff as M), state: 'on', active: 1 })
+  const counts = (w: World): string[][] => w.argv.filter(a => a.includes('--count'))
+  const compactRuns = (on: On): { n: number } => {
+    const r = { n: 0 }
+    on('command.run', { command: 'compact' }, () => {
+      r.n += 1
+      return { text: 'compacted' }
+    })
+    return r
+  }
+  const warn = async ($: any, w: World): Promise<void> => {
+    w.methods.handoff = { ...(w.methods.handoff as M), state: 'on', active: 1 }
+    await start($)
+    await measure($, 209000)
+  }
+
+  test('four presses give one command.run and one count; "Compacting…" replaces the button on both surfaces', async ($, on) => {
+    const w = world(on)
+    const c = compactRuns(on)
+    await warn($, w)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
+      await ui.unmount()
+    }
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    // Four presses at once (the button is still drawn when they arrive), then three more.
+    await Promise.all([1, 2, 3, 4].map(() => ui.press({ key: 'aionas-compact' }).catch(() => undefined)))
+    for (let i = 0; i < 3; i++) await ui.press({ key: 'aionas-compact' }).catch(() => undefined)
+    await w.clock.settle()
+    expect(c.n).toBe(1)
+    expect(counts(w).length).toBe(1)
+    expect(counts(w)[0]?.slice(-3)).toEqual(['--count', 'handoff', 'compact_pressed'])
+    expect(await ui.find({ key: 'aionas-compact' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'Compacting…' })).toBeDefined()
+    const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await term.find({ type: 'Text', text: 'Compacting…' })).toBeDefined()
+  })
+
+  test('the context size falling draws the line once, the warning row goes, and it is not in saved since install', async ($, on) => {
+    const w = world(on)
+    compactRuns(on)
+    w.savings = SAVINGS_USD.replace('\t3.8\t46.2\t', '\t0\t0\t')
+    await warn($, w)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ type: 'Text', text: /No saving measured yet/ as never })).toBeDefined()
+      await ui.unmount()
+    }
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-compact' })
+    await w.clock.settle()
+    await measure($, 26000)
+    const line = 'Compacted: 209K → 26K tokens, about 183K fewer tokens on each next turn'
+    for (const surface of SURFACES) {
+      const u = await $.ui.mount({ ...BAND, surface })
+      expect(await u.find({ type: 'Text', text: line })).toBeDefined()
+      expect(await u.find({ key: 'aionas-warning' })).toBeUndefined()
+      // The tracked methods' figure is untouched: no "No saving measured yet", no figure from the action.
+      expect(textOf(await u.drawn())).not.toContain('No saving measured yet')
+      expect(textOf(await u.drawn())).not.toContain('$')
+      await u.unmount()
+    }
+    // Once per action: a later reading does not add a second line.
+    await measure($, 40000)
+    expect(textOf(await ui.drawn()).split('Compacted:').length).toBe(2)
+    expect(counts(w).length).toBe(1)
+  })
+
+  test('a failed /compact gives the button back and counts nothing', async ($, on) => {
+    const w = world(on)
+    on('command.run', { command: 'compact' }, () => {
+      throw new Error('refused')
+    })
+    await warn($, w)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-compact' })
+    await w.clock.settle()
+    expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
+    expect(counts(w).length).toBe(0)
+    expect(w.toasts.at(-1)).toMatch(/did not run/)
+  })
+
+  test('context still above compact_at after the run: the button returns, and a second press runs again', async ($, on) => {
+    const w = world(on)
+    const c = compactRuns(on)
+    await warn($, w)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-compact' })
+    await w.clock.advance(10_500)
+    expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Compacted:/ as never })).toBeUndefined()
+    await ui.press({ key: 'aionas-compact' })
+    expect(c.n).toBe(2)
+  })
+
+  test('a /compact the person types is not counted and draws no line', async ($, on) => {
+    const w = world(on)
+    compactRuns(on)
+    await warn($, w)
+    await $.command.run({ command: 'compact' })
+    await measure($, 26000)
+    expect(counts(w).length).toBe(0)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /Compacted:/ as never })).toBeUndefined()
+  })
+
+  test('handoff in the terminal: the new conversation\'s first size draws the line; the desktop says it starts without the old size', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    on('command.run', { command: 'clear' }, () => {
+      w.sessionId = 'sess-test-2'
+      return { text: '' }
+    })
+    on('prompt.fill', ($, e) => ({ isFilled: true, text: e.text, cursor: e.text.length }) as never)
+    w.handoff = `handoff\tdelivered\t0\t${T0 - 60}\t1`
+    await start($)
+    await measure($, 209000)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-handoff-new' })
+    await w.clock.advance(500)
+    await measure($, 12000)
+    expect(await ui.find({ type: 'Text', text: 'New conversation: 209K → 12K tokens, about 197K fewer tokens on each next turn' })).toBeDefined()
+    expect(counts(w).length).toBe(0)
+  })
+
+  test('handoff in the desktop app: this band cannot see the new session, so it says only what it left behind', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    w.handoff = `handoff\tdelivered\t0\t${T0 - 60}\t1`
+    await start($)
+    await measure($, 209000)
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await ui.press({ key: 'aionas-handoff-new' })
+    await w.clock.settle()
+    expect(await ui.find({ type: 'Text', text: "Continued in a new conversation: it starts without this chat's 209K tokens." })).toBeDefined()
   })
 })
 

@@ -29,7 +29,7 @@ test_flush_sends_summed_numbers_only() {
   local args; args=$(t_call 1 args | tr '\n' ' ')
   t_contains "$args" "--connect-timeout 3 "
   t_contains "$args" "--max-time 5 "
-  t_eq '{"plugin_version":"0.5.0","counters":[{"day":"2026-10-20","method_id":"output_trim","counter":"fired","value":3},{"day":"2026-10-20","method_id":"output_trim","counter":"bypass","value":1},{"day":"2026-10-19","method_id":"output_trim","counter":"fired","value":1}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.6.0","counters":[{"day":"2026-10-20","method_id":"output_trim","counter":"fired","value":3},{"day":"2026-10-20","method_id":"output_trim","counter":"bypass","value":1},{"day":"2026-10-19","method_id":"output_trim","counter":"fired","value":1}]}' "$(t_call 1 body)"
   t_ok test ! -e "$(CD)/pending.tsv"
   t_eq "$T0" "$(cat "$(CD)/last_sent")"
 }
@@ -46,7 +46,7 @@ test_body_is_strictly_names_and_numbers() {
   t_lacks "$body" secret
   local rest
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"[a-z_]+","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.5.0","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.5.0"/"0.5.0",/')"
+  t_eq '{"plugin_version":"0.6.0","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.6.0"/"0.6.0",/')"
 }
 
 test_flush_is_hourly() {
@@ -123,6 +123,62 @@ test_inc_during_flush_is_not_lost() {
   wait
   AIONAS_NOW=$((T0 + 3600)) t_rc 0 aionas_counters_flush
   t_contains "$(t_call 1 body)$(t_call 2 body)" '"value":10'
+}
+
+# AIO-1023: compact_pressed (handoff only) goes in a request of its own.
+test_compact_pressed_is_handoff_only() {
+  t_rc 0 aionas_counter_inc handoff compact_pressed
+  t_rc 2 aionas_counter_inc output_trim compact_pressed
+  t_rc 2 aionas_counter_inc subagent_sonnet compact_pressed 2
+}
+
+test_compact_pressed_travels_alone_and_sums_per_day() {
+  t_enroll
+  export AIONAS_NOW=$T0
+  aionas_counter_inc handoff fired
+  aionas_counter_inc handoff compact_pressed
+  aionas_counter_inc handoff compact_pressed
+  t_rc 0 aionas_counters_flush
+  t_eq 2 "$(t_calls)"
+  t_eq '{"plugin_version":"0.6.0","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":1}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.6.0","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"compact_pressed","value":2}]}' "$(t_call 2 body)"
+  t_ok test ! -e "$(CD)/pending.tsv"
+  t_ok test ! -e "$(CD)/compact.tsv"
+}
+
+test_a_gateway_that_refuses_compact_pressed_still_gets_the_other_counters() {
+  t_enroll
+  export AIONAS_NOW=$T0
+  aionas_counter_inc handoff fired
+  aionas_counter_inc handoff compact_pressed
+  # The first request (the day's counters) is accepted; the second (compact_pressed, a name an older gateway does not know) is refused with 400.
+  local shim="$HOME/shim.sh"
+  cat >"$shim" <<SH
+#!/usr/bin/env bash
+n=\$(find "$FAKE_CURL_LOG" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+if [ "\$n" -ge 1 ]; then FAKE_CURL_STATUS=400; export FAKE_CURL_STATUS; fi
+exec "$T_REPO/tests/lib/fake-curl.sh" "\$@"
+SH
+  chmod +x "$shim"
+  AIONAS_CURL="$shim" t_rc 5 aionas_counters_flush
+  t_eq 2 "$(t_calls)"
+  t_ok test ! -e "$(CD)/pending.tsv"  # the accepted rows are gone
+  t_ok test ! -e "$(CD)/compact.tsv"  # the refused rows are dropped
+  t_eq 1 "$(cat "$(CD)/dropped")"
+  t_eq "$T0" "$(cat "$(CD)/last_sent")"
+}
+
+test_a_failed_counters_send_keeps_the_compact_rows_for_the_next_hour() {
+  t_enroll
+  export AIONAS_NOW=$T0
+  aionas_counter_inc handoff fired
+  aionas_counter_inc handoff compact_pressed
+  FAKE_CURL_STATUS=503 t_rc 1 aionas_counters_flush
+  t_eq 1 "$(t_calls)"
+  t_ok test -s "$(CD)/pending.tsv"
+  t_ok test -s "$(CD)/compact.tsv"
+  AIONAS_NOW=$((T0 + 3600)) t_rc 0 aionas_counters_flush
+  t_eq 3 "$(t_calls)"
 }
 
 t_main "$@"

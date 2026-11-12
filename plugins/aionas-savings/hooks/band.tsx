@@ -307,23 +307,31 @@ export const potentialLine = (s: Savings): string | undefined => {
 }
 
 // One line: "saved since 21 Oct <amount><tail>", the amount drawn strong.
-export const savedParts = (s: Savings): { lead: string; amount: string; tail: string } => {
+//
+// AIO-1023: once an action (/compact, the handoff) was taken in this session
+// its own line says what it did, so the "No saving measured yet" text is not
+// drawn then: the figure here is only the tracked methods', and "saved since
+// install" never includes an action.
+export const savedParts = (s: Savings, hasAction = false): { lead: string; amount: string; tail: string } => {
   const potential = potentialLine(s)
   const more = potential === undefined ? '' : ` · ${potential}`
-  if (!isMeasured(s.kind, s.sinceUsd, s.sinceTokens)) return { lead: 'No saving measured yet', amount: '', tail: more }
+  if (!isMeasured(s.kind, s.sinceUsd, s.sinceTokens)) {
+    if (hasAction) return { lead: potential ?? '', amount: '', tail: '' }
+    return { lead: 'No saving measured yet', amount: '', tail: more }
+  }
   const f = figure(s.kind, s.sinceUsd, s.sinceTokens)
   const since = dayLabel(s.sinceDate)
   return { lead: since === '' ? 'saved ' : `saved since ${since} `, amount: f.amount, tail: `${f.tail} est.${more}` }
 }
 
-export const savedLine = (s: Savings): string => {
-  const p = savedParts(s)
+export const savedLine = (s: Savings, hasAction = false): string => {
+  const p = savedParts(s, hasAction)
   return `${p.lead}${p.amount}${p.tail}`
 }
 
 // The full view: the cumulative figure with its counted days, today, the
 // potential, and when the server computed it.
-export const savedFull = (s: Savings, tzOffset: number): string => {
+export const savedFull = (s: Savings, tzOffset: number, hasAction = false): string => {
   const parts: string[] = []
   if (isMeasured(s.kind, s.sinceUsd, s.sinceTokens)) {
     const since = dayLabel(s.sinceDate)
@@ -331,9 +339,10 @@ export const savedFull = (s: Savings, tzOffset: number): string => {
     const head = since === '' ? 'saved' : `saved since ${since}`
     parts.push(`${head}${days} ${plain(figure(s.kind, s.sinceUsd, s.sinceTokens))}`)
     if (isMeasured(s.kind, s.todayUsd, s.todayTokens)) parts.push(`today ${plain(figure(s.kind, s.todayUsd, s.todayTokens))}`)
-  } else parts.push('No saving measured yet')
+  } else if (!hasAction) parts.push('No saving measured yet')
   const potential = potentialLine(s)
   if (potential !== undefined) parts.push(potential)
+  if (parts.length === 0) return ''
   parts.push('estimated')
   if (s.asOf > 0) parts.push(`updated ${hhmm(s.asOf, tzOffset)}`)
   return parts.join(' · ')
@@ -346,12 +355,13 @@ export type OneLine = { who: string; saved: string | undefined; chips: Chip[]; m
 // The one line (M1), fitted to `columns` (§3.1): drop the computer name, then
 // the org, then the chips past the fourth (as "+N"). The name, saved-today
 // and More always stay.
-export const fitOneLine = (f: Facts, route: string, chips: Chip[], columns: number): OneLine => {
+export const fitOneLine = (f: Facts, route: string, chips: Chip[], columns: number, hasAction = false): OneLine => {
   const whoOf = (org: boolean, computer: boolean): string =>
     f.me === undefined
       ? route
       : [f.me.name, org ? f.me.org : '', computer ? f.me.computer : '', route].filter(x => x !== '').join(' · ')
-  const saved = f.savings === undefined ? undefined : savedLine(f.savings)
+  const savedText = f.savings === undefined ? '' : savedLine(f.savings, hasAction)
+  const saved = savedText === '' ? undefined : savedText
   const width = (l: OneLine): number => {
     let w = cells(`aionas │ ${l.who} │ `) + (l.saved === undefined ? 0 : cells(l.saved) + 3)
     for (const c of l.chips) w += cells(c.text) + (c.action === undefined ? 1 : 5)
@@ -378,6 +388,30 @@ export type View = {
   contextTokens: number
   contextWindow: number
   laterAt: number
+  // AIO-1022: a /compact the band started is pending (the button is a dim
+  // "Compacting…" label meanwhile).
+  isCompacting: boolean
+  // AIO-1023: what the last action taken from the band did (undefined: none).
+  action: ActionResult | undefined
+}
+
+// What /compact or the handoff did, from the band's own context readings
+// before and after it (never from Claude Code's transcript text). `after` is
+// undefined when this session cannot see the new conversation's size (the
+// desktop app opens it as a session of its own).
+export type ActionResult = { kind: 'compact' | 'handoff'; before: number; after: number | undefined }
+
+// One plain line per action, drawn once; it is not part of "saved since
+// install" and carries no dollar figure.
+export const actionLine = (a: ActionResult): string | undefined => {
+  if (a.after === undefined) {
+    return a.kind === 'handoff' && a.before > 0
+      ? `Continued in a new conversation: it starts without this chat's ${fmtTokens(a.before)} tokens.`
+      : undefined
+  }
+  if (a.before <= a.after) return undefined
+  const head = a.kind === 'compact' ? 'Compacted' : 'New conversation'
+  return `${head}: ${fmtTokens(a.before)} → ${fmtTokens(a.after)} tokens, about ${fmtTokens(a.before - a.after)} fewer tokens on each next turn`
 }
 
 export type Handlers = {
@@ -428,6 +462,8 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
   const f = v.facts
   const chips = chipsOf(f, { isFull: v.isFull, sessionLevel: v.sessionLevel, contextTokens: v.contextTokens })
   const handoff = f.methods.find(m => m.id === 'handoff')
+  const doneLine = v.action === undefined ? undefined : actionLine(v.action)
+  const hasAction = doneLine !== undefined
 
   const isTerminal = e.surface === 'terminal'
   // The tip card of element `id` that starts at column `start` (a graphical
@@ -512,8 +548,10 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
 
   const rows = []
   if (!v.isFull) {
-    const line = fitOneLine(f, v.route, chips, v.columns)
-    const lead = `aionas │ ${line.who}${f.savings === undefined ? '' : ` │ ${savedLine(f.savings)}`} │`
+    const line = fitOneLine(f, v.route, chips, v.columns, hasAction)
+    const sp = f.savings === undefined ? undefined : savedParts(f.savings, hasAction)
+    const hasSaved = sp !== undefined && `${sp.lead}${sp.amount}${sp.tail}` !== ''
+    const lead = `aionas │ ${line.who}${f.savings === undefined || !hasSaved ? '' : ` │ ${savedLine(f.savings, hasAction)}`} │`
     rows.push(
       <Box key="aionas-line" flexDirection="row" flexWrap="wrap" columnGap={1}>
         <Box key="aionas-tipat-saved" hover={isTerminal ? { scope: tipScope('saved') } : undefined}>
@@ -524,14 +562,14 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
           <Text dimColor> │ </Text>
           {f.me === undefined ? <Text dimColor>{line.who}</Text> : <Text>{f.me.name}</Text>}
           {f.me !== undefined && line.who !== f.me.name && <Text dimColor>{line.who.slice(f.me.name.length)}</Text>}
-          {f.savings !== undefined && <Text dimColor> │ </Text>}
-          {f.savings !== undefined && <Text>{savedParts(f.savings).lead}</Text>}
-          {f.savings !== undefined && (
+          {sp !== undefined && hasSaved && <Text dimColor> │ </Text>}
+          {sp !== undefined && hasSaved && <Text>{sp.lead}</Text>}
+          {sp !== undefined && hasSaved && (
             <Text color="success" weight="bold">
-              {savedParts(f.savings).amount}
+              {sp.amount}
             </Text>
           )}
-          {f.savings !== undefined && <Text dimColor>{savedParts(f.savings).tail}</Text>}
+          {sp !== undefined && hasSaved && <Text dimColor>{sp.tail}</Text>}
           <Text dimColor> │</Text>
         </Text>
         {f.savings !== undefined && card('saved', TIPS.saved as string, 0)}
@@ -563,10 +601,10 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
         {who}
       </Text>,
     )
-    if (f.savings !== undefined)
+    if (f.savings !== undefined && savedFull(f.savings, f.tzOffset, hasAction) !== '')
       rows.push(
         <Box key="aionas-tipat-saved" hover={isTerminal ? { scope: tipScope('saved') } : undefined}>
-          <Text key="aionas-saved">{savedFull(f.savings, f.tzOffset)}</Text>
+          <Text key="aionas-saved">{savedFull(f.savings, f.tzOffset, hasAction)}</Text>
           {card('saved', TIPS.saved as string, 0)}
         </Box>,
       )
@@ -631,6 +669,15 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
     )
   }
 
+  if (doneLine !== undefined) {
+    rows.push(
+      <Box key="aionas-action" flexDirection="row" flexWrap="wrap" columnGap={1}>
+        <Text color="success">✓</Text>
+        <Text key="aionas-action-text">{doneLine}</Text>
+      </Box>,
+    )
+  }
+
   if (isWarning(v)) {
     const idle = handoff?.isActive === true && f.handoff.status === undefined ? ` Idle ${f.idleMinutes} min → a handoff doc is written.` : ''
     rows.push(
@@ -638,7 +685,13 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
         <Text color="warning">
           ▲ Context {fmtTokens(v.contextTokens)} of {fmtTokens(v.contextWindow)}. Compact recommended.{idle}
         </Text>
-        {!v.isWorking && <Button key="aionas-compact" label="/compact" variant="primary" onPress={on.compact} />}
+        {v.isCompacting ? (
+          <Text key="aionas-compacting" dimColor>
+            Compacting…
+          </Text>
+        ) : (
+          !v.isWorking && <Button key="aionas-compact" label="/compact" variant="primary" onPress={on.compact} />
+        )}
         <Button key="aionas-later" label="Later" dimColor onPress={on.later} />
       </Box>,
     )

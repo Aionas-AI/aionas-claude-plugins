@@ -230,7 +230,7 @@ Do not run /compact and do not change any setting. When both are done, say the h
 MSG
 }
 
-# aionas_handoff_deliver SID CWD TOKEN TOKENS MINUTES [TTL]: the wake. Exit 2 with
+# aionas_handoff_deliver SID CWD TOKEN TOKENS MINUTES [TTL] [PROMPT_ID]: the wake. Exit 2 with
 # the instruction on stderr (Claude Code wakes the same session with it) when
 # this is the one live timer and nothing was delivered yet; exit 0 and no
 # output otherwise.
@@ -249,6 +249,9 @@ aionas_handoff_deliver() {
   # the doc is written moves this on).
   aionas_handoff_status "$1" delivered "$4" $(($(aionas_now) + ${6:-3600}))
   aionas_counter_inc handoff fired >/dev/null 2>&1
+  # The record of the prompt that armed the timer (AIO-1004), with the
+  # context size the session would have carried.
+  [ -z "${7:-}" ] || aionas_request_mark "$1" handoff "$7" "$4" >/dev/null 2>&1
   printf '%s\n' "$_dv_msg" >&2
   return 2
 }

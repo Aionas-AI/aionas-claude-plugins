@@ -533,6 +533,8 @@ aionas_subagent_count() {
   aionas_enroll_has_alias || return 0
   if aionas_policy_active subagent_sonnet "${1:-}"; then
     aionas_counter_inc subagent_sonnet fired >/dev/null 2>&1
+    # The prompt it acted on is known at the turn's Stop (AIO-1004).
+    aionas_request_mark "${1:-}" subagent_sonnet >/dev/null 2>&1
   else
     aionas_counter_inc subagent_sonnet skipped >/dev/null 2>&1
   fi

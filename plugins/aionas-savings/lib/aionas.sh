@@ -2,7 +2,8 @@
 #   . "$(dirname "$0")/../lib/aionas.sh"
 # POSIX sh (bash 3.2 on macOS, dash, Git Bash on Windows); needs only awk,
 # grep, tr, date, mkdir, mv, rm and curl. Nothing here prints content: the
-# only network calls are the policy fetch and the counters send.
+# only network calls are the policy fetch, the counters send and the
+# per-request records (lib/requests.sh).
 # Recursion guard (W25-e, AIO-892): the usage probe runs Claude Code as a child
 # with AIONAS_USAGE_PROBE set, and that child starts every plugin hook again.
 # Every hook sources this file before it does anything, so this one line, the
@@ -24,6 +25,7 @@ AIONAS_PLUGIN_ROOT=${AIONAS_PLUGIN_ROOT:-$(dirname "$AIONAS_LIB")}
 . "$AIONAS_LIB/http.sh"
 . "$AIONAS_LIB/policy.sh"
 . "$AIONAS_LIB/counters.sh"
+. "$AIONAS_LIB/requests.sh"
 
 # aionas_plugin_version: the version in .claude-plugin/plugin.json.
 aionas_plugin_version() {

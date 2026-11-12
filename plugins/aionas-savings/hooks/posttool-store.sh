@@ -121,4 +121,12 @@ ctx=""
   printf '","stderr":"%s","interrupted":%s,"isImage":false}%s}}\n' "$stderr_v" "$intr" "$ctx"
 }
 aionas_counter_inc "$method" fired
+# The record of this prompt (AIO-1004): the tokens this view left out of the
+# model's context, from the sizes this hook already holds.
+_trim=''
+if [ "$bpt" -ge 1 ]; then
+  _trim=$(( (size - $(wc -c <"$tmp/view" | tr -d ' ')) / bpt ))
+  [ "$_trim" -ge 1 ] || _trim=''
+fi
+aionas_request_mark "$sid" "$method" "" "$_trim" >/dev/null 2>&1
 exit 0

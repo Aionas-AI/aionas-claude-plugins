@@ -92,7 +92,7 @@ while :; do
   [ -z "$_tr" ] || [ -f "$_tr" ] || exit 0
   _now=$(date +%s)
   if [ "$_now" -ge "$_deadline" ] && ! aionas_handoff_subagents_busy "$_tr" "$_sid" "$_busy"; then
-    aionas_handoff_deliver "$_sid" "$_cwd" "$_token" "$_tok" $(((_idle_s + 59) / 60)) "$(aionas_handoff_cache_ttl "$_tr")"
+    aionas_handoff_deliver "$_sid" "$_cwd" "$_token" "$_tok" $(((_idle_s + 59) / 60)) "$(aionas_handoff_cache_ttl "$_tr")" "$_pid"
     exit $?
   fi
   _s=$_poll

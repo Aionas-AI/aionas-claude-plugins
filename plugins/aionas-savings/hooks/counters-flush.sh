@@ -9,11 +9,22 @@
 #    batch waits for the next hourly send. Skipped this time when the policy
 #    sync just found the gateway unreachable, so the hook stays within its
 #    timeout. Numbers and closed names only.
+# 3. Per-request records (AIO-1004): the Stop input carries this turn's
+#    prompt_id, so the methods that acted during the turn (marked by the
+#    other hooks and the mod) become one record each for that prompt, sent to
+#    POST /enroll/v1/savings/requests at the end of every turn (a few seconds
+#    at most; what could not be sent waits for the next turn). Ids, method
+#    names, a time and token counts only.
 # Prints nothing, exits 0.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
 . "$AIONAS_PLUGIN_ROOT/commands/aionas-bypass-lib.sh" 2>/dev/null || exit 0
-cat >/dev/null 2>&1 || true
+_start=$(aionas_now)
+_in=$(cat 2>/dev/null) || _in=''
+_flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)
+_sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
+_pid=$(printf '%s\n' "$_flat" | aionas_json_get prompt_id)
+aionas_request_settle "$_sid" "$_pid" >/dev/null 2>&1
 if aionas_policy_sync_due; then
   aionas_policy_sync >/dev/null 2>&1
   rc=$?
@@ -23,5 +34,6 @@ if aionas_policy_sync_due; then
     exit 0
   fi
 fi
+aionas_requests_flush "$_start" >/dev/null 2>&1
 aionas_counters_flush >/dev/null 2>&1
 exit 0

@@ -75,4 +75,5 @@ http POST /enroll/v1/cc-session-git
 http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run
+net plugins/aionas-savings/hooks/branch-report.sh: ssh
 public GET /api/aionas/onboarding/scripts/

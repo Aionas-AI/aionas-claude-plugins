@@ -36,16 +36,37 @@ esac
 # session's environment must not point git at another repository.
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
 
+# aionas_ssh_hostname ALIAS: the real host behind an SSH alias, from this
+# computer's own ssh configuration (`ssh -G`: reads config, makes no connection).
+# Only the hostname line is read; nothing else of ssh's output is kept. Where ssh
+# is missing, fails or answers with anything odd, the alias itself is kept.
+# ssh.github.com (GitHub's SSH-over-443 host) is github.com.
+aionas_ssh_hostname() {
+  local a=$1 h="" t=""
+  if command -v ssh >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then t=timeout; elif command -v gtimeout >/dev/null 2>&1; then t=gtimeout; fi
+    if [ -n "$t" ]; then
+      h=$($t 3 ssh -G -o BatchMode=yes -- "$a" 2>/dev/null | awk '$1 == "hostname" { print $2; exit }')
+    else
+      h=$(ssh -G -o BatchMode=yes -- "$a" 2>/dev/null | awk '$1 == "hostname" { print $2; exit }')
+    fi
+  fi
+  case "$h" in "" | *[!A-Za-z0-9._-]*) h=$a ;; esac
+  case "$h" in [Ss][Ss][Hh].[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]) h=github.com ;; esac
+  printf '%s' "$h"
+}
+
 # aionas_remote_owner URL: "<host>/<owner>", lower-cased, worked out here from a
 # remote URL; prints nothing for a local path or anything unparsable. The user
 # and token part of a URL, the port and the repository name are dropped, so
 # none of them can leave. The owner is every path segment but the last.
 aionas_remote_owner() {
-  local u=$1 rest auth host path owner
+  local u=$1 rest auth host path owner ssh=0
   case "$u" in "" | /* | . | .* | ~* | file:* | *\\*) return 0 ;; esac
   case "$u" in
     *://*)
       rest=${u#*://}
+      case "${u%%://*}" in ssh | git+ssh | ssh+git) ssh=1 ;; esac
       case "$rest" in */*) ;; *) return 0 ;; esac
       auth=${rest%%/*}
       path=${rest#*/}
@@ -57,6 +78,7 @@ aionas_remote_owner() {
       case "$auth" in */*) return 0 ;; esac
       host=${auth##*@}
       path=${u#*:}
+      ssh=1
       ;;
     *) return 0 ;;
   esac
@@ -67,7 +89,10 @@ aionas_remote_owner() {
   # A one-letter host is a Windows drive ("C:/x"), not a server.
   [ "${#host}" -ge 2 ] || return 0
   case "$host" in *[!A-Za-z0-9._-]*) return 0 ;; esac
+  [ "$ssh" = 1 ] && host=$(aionas_ssh_hostname "$host")
   case "$owner" in "" | /* | */ | *//* | *[!A-Za-z0-9._/~-]*) return 0 ;; esac
+  # A "." or ".." segment is never an owner.
+  case "/$owner/" in */./* | */../*) return 0 ;; esac
   printf '%s/%s' "$host" "$owner" | tr 'A-Z' 'a-z'
 }
 
@@ -90,12 +115,24 @@ repo=${repo%.git}
 case "$repo" in *[!A-Za-z0-9._-]*) repo="" ;; esac
 # Who owns the repository, so Aionas can tell a company repo from a personal one:
 # "<host>/<owner>" of the same remote, and of a remote named upstream (a fork's
-# source). Worked out here; no URL, user, token or port leaves. root_sha is the
+# source; else the first other remote with a different owner). Worked out here; no URL, user, token or port leaves. root_sha is the
 # first commit (the smallest when there are several): a project id that needs
 # no remote.
 owner=""
 [ -n "$remote" ] && owner=$(aionas_remote_owner "$(git -C "$cwd" remote get-url "$remote" 2>/dev/null)")
-upstream=$(aionas_remote_owner "$(git -C "$cwd" remote get-url upstream 2>/dev/null)")
+upstream=""
+if git -C "$cwd" remote get-url upstream >/dev/null 2>&1; then
+  upstream=$(aionas_remote_owner "$(git -C "$cwd" remote get-url upstream 2>/dev/null)")
+else
+  # No remote named upstream: the first other remote (by name) whose owner
+  # differs from the origin's, e.g. a personal fork whose company remote is
+  # called "company".
+  for r in $(git -C "$cwd" remote 2>/dev/null | LC_ALL=C sort); do
+    [ "$r" = "$remote" ] && continue
+    o=$(aionas_remote_owner "$(git -C "$cwd" remote get-url "$r" 2>/dev/null)")
+    if [ -n "$o" ] && [ "$o" != "$owner" ]; then upstream=$o; break; fi
+  done
+fi
 root=$(git -C "$cwd" rev-list --max-parents=0 HEAD 2>/dev/null | LC_ALL=C sort | head -n 1)
 case "$root" in *[!0-9a-f]* | "") root="" ;; esac
 [ "${#root}" -eq 40 ] || root=""

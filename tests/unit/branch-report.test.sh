@@ -256,4 +256,75 @@ test_a_changed_remote_owner_is_sent_again() {
   t_contains "$(t_call 2 body)" '"repo_owner":"github.com/acme"'
 }
 
+
+# fake_ssh: a PATH-first `ssh` whose -G answer maps the alias github-work to
+# ssh.github.com and says a lot more than the hostname (which must not leave).
+fake_ssh() {
+  local b
+  b=$(mktemp -d "$T_ROOT/bin.XXXXXX")
+  cat >"$b/ssh" <<'SH'
+#!/bin/sh
+for a in "$@"; do h=$a; done
+echo "user git"
+echo "identityfile /home/SECRET-KEY-PATH/id_ed25519"
+case "$h" in
+  github-work) echo "hostname ssh.github.com" ;;
+  gl) echo "hostname gitlab.company.com" ;;
+  broken) exit 1 ;;
+  *) echo "hostname $h" ;;
+esac
+SH
+  chmod +x "$b/ssh"
+  printf '%s' "$b"
+}
+
+test_an_ssh_alias_resolves_to_the_real_host() {
+  t_enroll; export AIONAS_NOW=$T0
+  local b
+  PATH="$(fake_ssh):$PATH"
+  b=$(owner_body "git@github-work:acme/x.git")
+  t_contains "$b" '"repo_owner":"github.com/acme"'
+  t_lacks "$b" SECRET-KEY-PATH "nothing but the hostname is taken from ssh -G"
+  b=$(owner_body "ssh://git@gl:2222/grp/sub/x.git")
+  t_contains "$b" '"repo_owner":"gitlab.company.com/grp/sub"'
+  b=$(owner_body "git@broken:acme/x.git")
+  t_contains "$b" '"repo_owner":"broken/acme"' "a failing ssh -G keeps the alias"
+  b=$(owner_body "git@ssh.github.com:Acme/x.git")
+  t_contains "$b" '"repo_owner":"github.com/acme"' "ssh.github.com is github.com"
+  b=$(owner_body "https://github-work/acme/x.git")
+  t_contains "$b" '"repo_owner":"github-work/acme"' "an https host is not an ssh alias"
+}
+
+test_instead_of_is_applied_before_parsing() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  git -C "$d" config url."https://github.com/".insteadOf "gh:"
+  git -C "$d" remote add origin "gh:Acme/x.git"
+  hook "$d"
+  t_contains "$(t_call 1 body)" '"repo_owner":"github.com/acme"'
+}
+
+test_upstream_falls_back_to_another_remote_with_a_different_owner() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d b
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  git -C "$d" remote add backup "https://github.com/dana/x-mirror.git"
+  git -C "$d" remote add company "https://github.com/Acme/x.git"
+  hook "$d"
+  b=$(t_call 1 body)
+  t_contains "$b" '"repo_owner":"github.com/dana"'
+  t_contains "$b" '"upstream_owner":"github.com/acme"' "the company remote counts, same-owner remotes do not"
+  b=$(owner_body "https://github.com/dana/x.git" "https://github.com/acme/x.git")
+  t_contains "$b" '"upstream_owner":"github.com/acme"' "a remote named upstream still wins"
+}
+
+test_an_owner_with_a_dot_segment_is_not_sent() {
+  t_owner "https://github.com/../x.git" ""
+  t_owner "https://github.com/./x.git" ""
+  t_owner "https://github.com/a/../b/x.git" ""
+  t_owner "https://github.com/a.b/x.git" github.com/a.b
+}
+
 t_main "$@"

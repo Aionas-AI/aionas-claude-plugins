@@ -327,4 +327,77 @@ test_an_owner_with_a_dot_segment_is_not_sent() {
   t_owner "https://github.com/a.b/x.git" github.com/a.b
 }
 
+
+test_upstream_owner_lists_all_other_remotes() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d b i
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  git -C "$d" remote add alpha "https://github.com/third/x.git"
+  git -C "$d" remote add company "https://github.com/Acme/x.git"
+  git -C "$d" remote add mirror "https://github.com/dana/x2.git"
+  git -C "$d" remote add dup "https://github.com/third/x3.git"
+  hook "$d"
+  b=$(t_call 1 body)
+  t_contains "$b" '"upstream_owner":"github.com/third github.com/acme"' "name order, no duplicate, none equal to repo_owner"
+  git -C "$d" remote add upstream "https://github.com/zed/x.git"
+  hook "$d"
+  t_contains "$(t_call 2 body)" '"upstream_owner":"github.com/zed github.com/third github.com/acme"' "upstream comes first"
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  for i in 1 2 3 4 5 6 7; do git -C "$d" remote add "r$i" "https://github.com/o$i/x.git"; done
+  hook "$d" 2f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b
+  b=$(t_call 3 body)
+  t_contains "$b" 'github.com/o5"' "five owners"
+  t_lacks "$b" github.com/o6 "at most 5"
+}
+
+# ssh_counter: a PATH-first ssh that logs each call; prints its folder.
+counting_ssh() {
+  local b
+  b=$(mktemp -d "$T_ROOT/cbin.XXXXXX")
+  printf '#!/bin/sh\necho call >>"%s/ssh.log"\nfor a in "$@"; do h=$a; done\necho "hostname real-$h"\n' "$b" >"$b/ssh"
+  chmod +x "$b/ssh"
+  printf '%s' "$b"
+}
+
+test_ssh_g_runs_once_per_alias_per_day_not_on_every_prompt() {
+  t_enroll; export AIONAS_NOW=$T0
+  local b d
+  b=$(counting_ssh)
+  PATH="$b:$PATH"
+  d=$(repo main)
+  git -C "$d" remote add origin "git@work:acme/x.git"
+  hook "$d"
+  t_contains "$(t_call 1 body)" '"repo_owner":"real-work/acme"'
+  git -C "$d" -c user.name=t -c user.email=t@example.test commit -q --allow-empty -m next
+  hook "$d"
+  git -C "$d" -c user.name=t -c user.email=t@example.test commit -q --allow-empty -m next2
+  hook "$d"
+  t_eq 3 "$(t_calls)"
+  t_eq 1 "$(wc -l <"$b/ssh.log" | tr -d ' ')" "ssh -G ran once for the alias"
+  export AIONAS_NOW=$((T0 + 86400))
+  hook "$d"
+  t_eq 2 "$(wc -l <"$b/ssh.log" | tr -d ' ')" "and again the next day"
+}
+
+test_ssh_g_never_runs_without_timeout_or_gtimeout() {
+  t_enroll; export AIONAS_NOW=$T0
+  local b d bin tool p
+  b=$(counting_ssh)
+  bin=$(mktemp -d "$T_ROOT/min.XXXXXX")
+  # a PATH with the tools the hook needs, but no timeout / gtimeout
+  for tool in bash sh git sed awk grep head sort tr cat date find mkdir mv rm chmod mktemp dirname basename cut wc uname id ln cp touch env ls tail xargs od hostname sleep stat; do
+    p=$(command -v "$tool" 2>/dev/null) || continue
+    case "$p" in /*) printf '#!/bin/sh\nexec "%s" "$@"\n' "$p" >"$bin/$tool"; chmod +x "$bin/$tool" ;; esac
+  done
+  cp "$b/ssh" "$bin/ssh"
+  d=$(repo main)
+  git -C "$d" remote add origin "git@work:acme/x.git"
+  PATH="$bin" hook "$d" 2>/dev/null
+  t_eq 1 "$(t_calls)"
+  t_contains "$(t_call 1 body)" '"repo_owner":"work/acme"' "the alias is kept"
+  t_eq "" "$(cat "$b/ssh.log" 2>/dev/null)" "ssh was not run"
+}
+
 t_main "$@"

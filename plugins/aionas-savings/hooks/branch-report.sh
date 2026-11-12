@@ -39,20 +39,31 @@ unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
 # aionas_ssh_hostname ALIAS: the real host behind an SSH alias, from this
 # computer's own ssh configuration (`ssh -G`: reads config, makes no connection).
 # Only the hostname line is read; nothing else of ssh's output is kept. Where ssh
-# is missing, fails or answers with anything odd, the alias itself is kept.
+# is missing, fails or answers with anything odd, the alias itself is kept (the
+# server treats an unresolved alias as undecided).
 # ssh.github.com (GitHub's SSH-over-443 host) is github.com.
+# `ssh -G` evaluates `Match exec` in the member's ssh config, i.e. it can run the
+# member's own commands. That is why it is rare and bounded: an answer (or a
+# failure) is cached per alias for the UTC day in $dir/ssh-hosts, so it is not
+# run on every prompt; it runs only under `timeout` / `gtimeout` (3 s), and where
+# neither exists it does not run at all.
 aionas_ssh_hostname() {
-  local a=$1 h="" t=""
+  local a=$1 h="" t="" day cache="$dir/ssh-hosts" line
+  day=$(($(aionas_now) / 86400))
+  if [ -f "$cache" ]; then
+    line=$(grep "^$day $a " "$cache" 2>/dev/null | head -n 1)
+    if [ -n "$line" ]; then printf '%s' "${line##* }"; return 0; fi
+  fi
   if command -v ssh >/dev/null 2>&1; then
     if command -v timeout >/dev/null 2>&1; then t=timeout; elif command -v gtimeout >/dev/null 2>&1; then t=gtimeout; fi
-    if [ -n "$t" ]; then
-      h=$($t 3 ssh -G -o BatchMode=yes -- "$a" 2>/dev/null | awk '$1 == "hostname" { print $2; exit }')
-    else
-      h=$(ssh -G -o BatchMode=yes -- "$a" 2>/dev/null | awk '$1 == "hostname" { print $2; exit }')
-    fi
+    [ -n "$t" ] || { printf '%s' "$a"; return 0; }
+    h=$($t 3 ssh -G -o BatchMode=yes -- "$a" 2>/dev/null | awk '$1 == "hostname" { print $2; exit }')
+  else
+    printf '%s' "$a"; return 0
   fi
   case "$h" in "" | *[!A-Za-z0-9._-]*) h=$a ;; esac
   case "$h" in [Ss][Ss][Hh].[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]) h=github.com ;; esac
+  { grep "^$day " "$cache" 2>/dev/null; printf '%s %s %s\n' "$day" "$a" "$h"; } | aionas_write_atomic "$cache" 2>/dev/null
   printf '%s' "$h"
 }
 
@@ -96,6 +107,9 @@ aionas_remote_owner() {
   printf '%s/%s' "$host" "$owner" | tr 'A-Z' 'a-z'
 }
 
+dir="$(aionas_savings_dir)/branch-report"
+aionas_mkdir "$dir" || exit 0
+seen=""
 branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
 sha=$(git -C "$cwd" rev-parse HEAD 2>/dev/null) || exit 0
 case "$branch" in "" | HEAD) exit 0 ;; esac
@@ -120,25 +134,27 @@ case "$repo" in *[!A-Za-z0-9._-]*) repo="" ;; esac
 # no remote.
 owner=""
 [ -n "$remote" ] && owner=$(aionas_remote_owner "$(git -C "$cwd" remote get-url "$remote" 2>/dev/null)")
+# upstream_owner: the owners of ALL the other remotes, "upstream" first, then the
+# rest in name order; not the origin's own, no duplicates, none equal to
+# repo_owner, at most 5, one space between (a personal fork's company remote can
+# have any name).
 upstream=""
-if git -C "$cwd" remote get-url upstream >/dev/null 2>&1; then
-  upstream=$(aionas_remote_owner "$(git -C "$cwd" remote get-url upstream 2>/dev/null)")
-else
-  # No remote named upstream: the first other remote (by name) whose owner
-  # differs from the origin's, e.g. a personal fork whose company remote is
-  # called "company".
-  for r in $(git -C "$cwd" remote 2>/dev/null | LC_ALL=C sort); do
-    [ "$r" = "$remote" ] && continue
-    o=$(aionas_remote_owner "$(git -C "$cwd" remote get-url "$r" 2>/dev/null)")
-    if [ -n "$o" ] && [ "$o" != "$owner" ]; then upstream=$o; break; fi
-  done
-fi
+n=0
+for r in upstream $(git -C "$cwd" remote 2>/dev/null | LC_ALL=C sort); do
+  [ "$r" = "$remote" ] && continue
+  case " $seen " in *" $r "*) continue ;; esac
+  seen="$seen $r"
+  o=$(aionas_remote_owner "$(git -C "$cwd" remote get-url "$r" 2>/dev/null)")
+  [ -n "$o" ] && [ "$o" != "$owner" ] || continue
+  case " $upstream " in *" $o "*) continue ;; esac
+  upstream="${upstream:+$upstream }$o"
+  n=$((n + 1))
+  [ "$n" -lt 5 ] || break
+done
 root=$(git -C "$cwd" rev-list --max-parents=0 HEAD 2>/dev/null | LC_ALL=C sort | head -n 1)
 case "$root" in *[!0-9a-f]* | "") root="" ;; esac
 [ "${#root}" -eq 40 ] || root=""
 
-dir="$(aionas_savings_dir)/branch-report"
-aionas_mkdir "$dir" || exit 0
 last="$dir/$sid"
 state="$branch|$sha|$repo|$owner|$upstream|$root"
 if [ -f "$last" ] && [ "$(cat "$last" 2>/dev/null)" = "$state" ]; then exit 0; fi

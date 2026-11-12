@@ -400,4 +400,57 @@ test_ssh_g_never_runs_without_timeout_or_gtimeout() {
   t_eq "" "$(cat "$b/ssh.log" 2>/dev/null)" "ssh was not run"
 }
 
+
+test_an_owner_over_255_bytes_is_not_sent() {
+  t_enroll; export AIONAS_NOW=$T0
+  local long b
+  long=$(printf 'a%.0s' $(seq 1 250))
+  b=$(owner_body "https://github.com/$long/x.git")
+  t_lacks "$b" repo_owner "github.com/ + 250 is over 255"
+  b=$(owner_body "https://github.com/$(printf 'a%.0s' $(seq 1 240))/x.git")
+  t_contains "$b" '"repo_owner":"github.com/aaaa'
+}
+
+test_an_oversize_body_drops_upstream_owner_not_the_report() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d b
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  git -C "$d" remote add company "https://github.com/acme/x.git"
+  hook "$d"
+  t_contains "$(t_call 1 body)" '"upstream_owner":"github.com/acme"'
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  git -C "$d" remote add company "https://github.com/acme/x.git"
+  AIONAS_BRANCH_BODY_MAX=200 hook "$d" 2f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b
+  b=$(t_call 2 body)
+  t_lacks "$b" upstream_owner "over the limit: left out"
+  t_contains "$b" '"repo_owner":"github.com/dana"' "the rest is still sent"
+}
+
+test_a_remote_name_is_never_glob_expanded() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d b bin real
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  touch "$d/wexyz" "$d/wezzz"
+  # git itself refuses a "*" in a remote name, so a PATH-first git wrapper lists one:
+  # the name must reach `git remote get-url` as written, not as a file match.
+  real=$(command -v git)
+  bin=$(mktemp -d "$T_ROOT/gbin.XXXXXX")
+  cat >"$bin/git" <<SH
+#!/bin/sh
+case "\$*" in
+  *"remote get-url we*") echo "https://github.com/acme/x.git"; exit 0 ;;
+  *"remote get-url"*) ;;
+  *" remote") "$real" "\$@"; echo 'we*'; exit 0 ;;
+esac
+exec "$real" "\$@"
+SH
+  chmod +x "$bin/git"
+  (cd "$d" && PATH="$bin:$PATH" hook "$d")
+  b=$(t_call 1 body)
+  t_contains "$b" '"upstream_owner":"github.com/acme"'
+}
+
 t_main "$@"

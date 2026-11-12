@@ -72,7 +72,7 @@ aionas_ssh_hostname() {
 # and token part of a URL, the port and the repository name are dropped, so
 # none of them can leave. The owner is every path segment but the last.
 aionas_remote_owner() {
-  local u=$1 rest auth host path owner ssh=0
+  local u=$1 rest auth host path owner ssh=0 o
   case "$u" in "" | /* | . | .* | ~* | file:* | *\\*) return 0 ;; esac
   case "$u" in
     *://*)
@@ -104,7 +104,10 @@ aionas_remote_owner() {
   case "$owner" in "" | /* | */ | *//* | *[!A-Za-z0-9._/~-]*) return 0 ;; esac
   # A "." or ".." segment is never an owner.
   case "/$owner/" in */./* | */../*) return 0 ;; esac
-  printf '%s/%s' "$host" "$owner" | tr 'A-Z' 'a-z'
+  o=$(printf '%s/%s' "$host" "$owner" | tr 'A-Z' 'a-z')
+  # An owner over 255 bytes is not sent.
+  [ "${#o}" -le 255 ] || return 0
+  printf '%s' "$o"
 }
 
 dir="$(aionas_savings_dir)/branch-report"
@@ -140,7 +143,10 @@ owner=""
 # have any name).
 upstream=""
 n=0
-for r in upstream $(git -C "$cwd" remote 2>/dev/null | LC_ALL=C sort); do
+# Read line by line (never word-split or glob-expanded): a remote name is data.
+remotes=$(echo upstream; git -C "$cwd" remote 2>/dev/null | LC_ALL=C sort)
+while IFS= read -r r; do
+  [ -n "$r" ] || continue
   [ "$r" = "$remote" ] && continue
   case " $seen " in *" $r "*) continue ;; esac
   seen="$seen $r"
@@ -150,7 +156,9 @@ for r in upstream $(git -C "$cwd" remote 2>/dev/null | LC_ALL=C sort); do
   upstream="${upstream:+$upstream }$o"
   n=$((n + 1))
   [ "$n" -lt 5 ] || break
-done
+done <<EOF
+$remotes
+EOF
 root=$(git -C "$cwd" rev-list --max-parents=0 HEAD 2>/dev/null | LC_ALL=C sort | head -n 1)
 case "$root" in *[!0-9a-f]* | "") root="" ;; esac
 [ "${#root}" -eq 40 ] || root=""
@@ -172,6 +180,16 @@ extra=""
 [ -n "$root" ] && extra="$extra,\"root_sha\":\"$root\""
 printf '{"session_id":"%s","branch":%s,"head_sha":"%s","observed_at":"%s"%s%s}' \
   "$sid" "$(aionas_json_escape "$branch")" "$sha" "$observed" "$repo_field" "$extra" >"$body"
+# The server refuses a body over 4 KB, and a refused body would be retried on
+# every prompt: when this one is over ~3.5 KB, upstream_owner is left out.
+max=${AIONAS_BRANCH_BODY_MAX:-3500}
+if [ "$(wc -c <"$body" | tr -d ' ')" -gt "$max" ] && [ -n "$upstream" ]; then
+  extra=""
+  [ -n "$owner" ] && extra="$extra,\"repo_owner\":\"$owner\""
+  [ -n "$root" ] && extra="$extra,\"root_sha\":\"$root\""
+  printf '{"session_id":"%s","branch":%s,"head_sha":"%s","observed_at":"%s"%s%s}' \
+    "$sid" "$(aionas_json_escape "$branch")" "$sha" "$observed" "$repo_field" "$extra" >"$body"
+fi
 if aionas_http POST /enroll/v1/cc-session-git "$body" "$out" >/dev/null 2>&1; then
   printf '%s\n' "$state" | aionas_write_atomic "$last"
 fi

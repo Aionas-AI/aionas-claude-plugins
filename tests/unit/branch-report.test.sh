@@ -32,7 +32,7 @@ test_sends_the_branch_and_commit_only() {
   t_eq POST "$(t_call 1 method)"
   t_eq "https://gw.example.test/enroll/v1/cc-session-git" "$(t_call 1 url)"
   t_contains "$(t_call 1 headers)" "Authorization: Bearer $T_ALIAS"
-  t_eq "{\"session_id\":\"$SID\",\"branch\":\"feat/billing-export\",\"head_sha\":\"$sha\",\"observed_at\":\"2026-10-20T10:00:00Z\"}" "$(t_call 1 body)"
+  t_eq "{\"session_id\":\"$SID\",\"branch\":\"feat/billing-export\",\"head_sha\":\"$sha\",\"observed_at\":\"2026-10-20T10:00:00Z\",\"root_sha\":\"$sha\"}" "$(t_call 1 body)"
   t_lacks "$(t_call 1 body)" CANARY-PROMPT "the prompt never leaves"
   t_lacks "$(t_call 1 body)" "$d" "the folder path never leaves"
   t_lacks "$(t_call 1 args)" "$T_ALIAS" "the alias is never on a command line"
@@ -92,7 +92,7 @@ test_sends_the_repository_name_never_the_remote_url() {
   hook "$d"
   t_contains "$(t_call 1 body)" '"repo":"gateway"'
   t_lacks "$(t_call 1 body)" SECRET-TOKEN "a token in the remote URL never leaves"
-  t_lacks "$(t_call 1 body)" github.com "the remote URL never leaves"
+  t_lacks "$(t_call 1 body)" "https://" "the remote URL never leaves"
   local d2
   d2=$(repo main)
   git -C "$d2" remote add origin "git@github.com:acme/ui.git"
@@ -134,6 +134,126 @@ test_an_inherited_git_dir_never_points_at_another_repository() {
   other=$(repo feat/other)
   GIT_DIR="$other/.git" hook "$d"
   t_contains "$(t_call 1 body)" '"branch":"feat/mine"'
+}
+
+
+# owner_of REMOTE-URL [UPSTREAM-URL]: runs the hook on a repo with those remotes; prints the body.
+owner_body() {
+  local d
+  d=$(repo main)
+  [ -n "$1" ] && git -C "$d" remote add origin "$1"
+  [ -n "${2:-}" ] && git -C "$d" remote add upstream "$2"
+  hook "$d" >/dev/null
+  t_call "$(t_calls)" body
+}
+# t_owner REMOTE-URL EXPECTED: the repo_owner the hook sends for that origin ("" = none).
+t_owner() {
+  t_enroll; export AIONAS_NOW=$T0
+  local b
+  b=$(owner_body "$1")
+  if [ -n "$2" ]; then
+    t_contains "$b" "\"repo_owner\":\"$2\"" "origin $1"
+  else
+    t_lacks "$b" repo_owner "origin $1 sends no owner"
+  fi
+}
+
+test_repo_owner_is_host_and_owner_lower_cased() {
+  t_owner "https://github.com/Acme/gateway.git" github.com/acme
+  t_owner "git@github.com:acme/gateway.git" github.com/acme
+  t_owner "git@github-work:acme/x.git" github-work/acme
+  t_owner "https://gitlab.company.com/group/sub/repo.git" gitlab.company.com/group/sub
+  t_owner "ssh://git@host:2222/acme/x.git" host/acme
+  t_owner "https://GitHub.com/ACME/Repo/" github.com/acme
+}
+
+test_repo_owner_never_carries_a_credential_or_a_port() {
+  t_enroll; export AIONAS_NOW=$T0
+  local b
+  b=$(owner_body "https://dana:SECRET-TOKEN@github.com/acme/gateway.git")
+  t_contains "$b" '"repo_owner":"github.com/acme"'
+  t_lacks "$b" SECRET-TOKEN "a token in the URL never leaves"
+  t_lacks "$b" dana "the user in the URL never leaves"
+  b=$(owner_body "https://ghp_ABC123@github.com/acme/gateway.git")
+  t_lacks "$b" ghp_ABC123 "a token-only user never leaves"
+  t_contains "$b" '"repo_owner":"github.com/acme"'
+  b=$(owner_body "ssh://git@host:2222/acme/x.git")
+  t_lacks "$b" 2222 "the port never leaves"
+}
+
+test_repo_owner_is_absent_for_a_local_or_unparsable_remote() {
+  t_owner "/srv/git/acme/x.git" ""
+  t_owner "file:///srv/git/acme/x.git" ""
+  t_owner "../acme/x" ""
+  t_owner "C:/work/x" ""
+  t_owner "https://github.com/x.git" ""
+  t_owner "https://github.com" ""
+}
+
+test_repo_owner_uses_the_first_remote_when_there_is_no_origin() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  git -C "$d" remote add github "git@github.com:Acme/billing.git"
+  hook "$d"
+  t_contains "$(t_call 1 body)" '"repo_owner":"github.com/acme"'
+}
+
+test_upstream_owner_only_when_an_upstream_remote_exists() {
+  t_enroll; export AIONAS_NOW=$T0
+  local b
+  b=$(owner_body "https://github.com/dana/gateway.git")
+  t_lacks "$b" upstream_owner "no upstream, no field"
+  b=$(owner_body "https://github.com/dana/gateway.git" "https://tok:SECRET2@github.com/Acme/gateway.git")
+  t_contains "$b" '"repo_owner":"github.com/dana"'
+  t_contains "$b" '"upstream_owner":"github.com/acme"'
+  t_lacks "$b" SECRET2 "an upstream token never leaves"
+}
+
+test_root_sha_is_the_first_commit_even_with_no_remote() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d root
+  d=$(repo main)
+  root=$(git -C "$d" rev-parse HEAD)
+  git -C "$d" -c user.name=t -c user.email=t@example.test commit -q --allow-empty -m next
+  hook "$d"
+  t_contains "$(t_call 1 body)" "\"root_sha\":\"$root\""
+  t_lacks "$(t_call 1 body)" repo_owner
+  t_lacks "$(t_call 1 body)" '"repo"'
+}
+
+test_root_sha_is_the_smallest_of_several_roots() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d a b c want
+  d=$(repo main)
+  a=$(git -C "$d" rev-parse HEAD)
+  # two more root commits (orphan branches), then merge them so HEAD sees all roots
+  git -C "$d" checkout -q --orphan o1
+  git -C "$d" -c user.name=t -c user.email=t@example.test commit -q --allow-empty -m o1
+  b=$(git -C "$d" rev-parse HEAD)
+  git -C "$d" checkout -q --orphan o2
+  GIT_COMMITTER_DATE="2001-01-01T00:00:00Z" git -C "$d" -c user.name=t -c user.email=t@example.test commit -q --allow-empty -m o2
+  c=$(git -C "$d" rev-parse HEAD)
+  git -C "$d" checkout -q main
+  git -C "$d" -c user.name=t -c user.email=t@example.test merge -q --allow-unrelated-histories --no-edit o1 >/dev/null 2>&1
+  git -C "$d" -c user.name=t -c user.email=t@example.test merge -q --allow-unrelated-histories --no-edit o2 >/dev/null 2>&1
+  t_eq 3 "$(git -C "$d" rev-list --max-parents=0 HEAD | wc -l | tr -d ' ')" "three roots reach HEAD"
+  want=$(printf '%s\n%s\n%s\n' "$a" "$b" "$c" | LC_ALL=C sort | head -n 1)
+  hook "$d"
+  t_contains "$(t_call 1 body)" "\"root_sha\":\"$want\""
+}
+
+test_a_changed_remote_owner_is_sent_again() {
+  t_enroll; export AIONAS_NOW=$T0
+  local d
+  d=$(repo main)
+  git -C "$d" remote add origin "https://github.com/dana/x.git"
+  hook "$d"; hook "$d"
+  t_eq 1 "$(t_calls)"
+  git -C "$d" remote set-url origin "https://github.com/acme/x.git"
+  hook "$d"
+  t_eq 2 "$(t_calls)"
+  t_contains "$(t_call 2 body)" '"repo_owner":"github.com/acme"'
 }
 
 t_main "$@"

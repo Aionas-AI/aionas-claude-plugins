@@ -5,10 +5,23 @@
 # as the policy sync (3 s connect, 5 s total, no retry). Only closed-list
 # names and whole numbers are ever queued or sent: never content.
 #
+# The server stores a counter's value as this computer's RUNNING TOTAL for
+# that UTC day and replaces it on each send (it never lowers it), so what is
+# sent is always the total, never an increment (AIO-1004, W31-30). Hooks only
+# append increments to queue.tsv (atomic, no lock); each flush folds the queue
+# into pending.tsv / compact.tsv, which hold the running totals per day, method
+# and counter, under the counters lock (so several Claude sessions on one
+# computer add up). After a confirmed send the rows of past UTC days are
+# pruned; today's total stays, to be repeated with whatever was added.
+#
 # Files under $(aionas_savings_dir)/counters:
 #   queue.tsv        appended by hooks: day method counter value
 #   batch.*          queue files taken by a flush
-#   pending.tsv      the summed rows not yet accepted by the server
+#   pending.tsv      the running totals (day method counter total); today's
+#                    stay after a send, past days are pruned once confirmed
+#   compact.tsv      the same for compact_pressed (sent in a request of its own)
+#   *.tsv.ok         a copy of the totals the server last accepted (an
+#                    unchanged total is not sent again)
 #   last_attempt     epoch of the last send attempt (the hourly clock)
 #   last_sent        epoch of the last accepted send
 #   dropped          rows the server refused (400/413), summed
@@ -20,6 +33,8 @@ AIONAS_COUNTERS_INTERVAL=${AIONAS_COUNTERS_INTERVAL:-3600}
 aionas_counter_inc() {
   aionas_is_method "$1" || return 2
   aionas_is_counter "$2" || return 2
+  # The band's /compact count (AIO-1023) belongs to the handoff method.
+  { [ "$2" != compact_pressed ] || [ "$1" = handoff ]; } || return 2
   _ci_n=${3:-1}
   aionas_is_uint "$_ci_n" || return 2
   [ "$_ci_n" -ge 1 ] && [ "$_ci_n" -le 1000000 ] || return 2
@@ -57,7 +72,7 @@ aionas_counters_flush() {
   (
     cd "$_cf_dir" || exit 1
     # shellcheck disable=SC2086
-    cat pending.tsv $_cf_batches 2>/dev/null
+    cat pending.tsv compact.tsv $_cf_batches 2>/dev/null
   ) | awk -F '\t' -v methods="$AIONAS_METHODS" -v counters="$AIONAS_COUNTERS" -v oldest="$_cf_oldest" '
       BEGIN {
         n = split(methods, a, " "); for (i = 1; i <= n; i++) okm[a[i]] = 1
@@ -69,37 +84,64 @@ aionas_counters_flush() {
         sum[k] += $4
       }
       END { for (i = 1; i <= nk; i++) printf "%s\t%d\n", order[i], sum[order[i]] }' >"$_cf_dir/.pending.$$"
-  mv -f "$_cf_dir/.pending.$$" "$_cf_dir/pending.tsv"
+  # compact_pressed (AIO-1023) travels in a request of its own, so a gateway
+  # that does not know that name yet refuses only those rows, never the
+  # day's other counters.
+  awk -F '\t' '$3 != "compact_pressed"' "$_cf_dir/.pending.$$" >"$_cf_dir/pending.tsv"
+  awk -F '\t' '$3 == "compact_pressed"' "$_cf_dir/.pending.$$" >"$_cf_dir/compact.tsv"
+  rm -f "$_cf_dir/.pending.$$"
   for _cf_b in $_cf_batches; do rm -f "$_cf_dir/$_cf_b"; done
-  if [ ! -s "$_cf_dir/pending.tsv" ]; then
-    rm -f "$_cf_dir/pending.tsv"
-    aionas_lock_release counters
+  [ -s "$_cf_dir/pending.tsv" ] || rm -f "$_cf_dir/pending.tsv"
+  [ -s "$_cf_dir/compact.tsv" ] || rm -f "$_cf_dir/compact.tsv"
+  _cf_rc=0
+  if [ -f "$_cf_dir/pending.tsv" ]; then
+    _aionas_counters_send "$_cf_dir/pending.tsv" "$_cf_dir"
+    _cf_rc=$?
+    [ $_cf_rc -ne 0 ] || echo "$_cf_now" | aionas_write_atomic "$_cf_dir/last_sent"
+  fi
+  # Not enrolled, or a send that failed: the compact rows wait with the rest.
+  if [ -f "$_cf_dir/compact.tsv" ] && [ $_cf_rc -ne 3 ] && [ $_cf_rc -ne 1 ]; then
+    _aionas_counters_send "$_cf_dir/compact.tsv" "$_cf_dir"
+    _cf_c=$?
+    [ $_cf_c -eq 0 ] || _cf_rc=$_cf_c
+  fi
+  aionas_lock_release counters
+  return $_cf_rc
+}
+
+# _aionas_counters_send FILE DIR: one request with the running totals of FILE.
+# Accepted (0): past days are pruned, today's totals stay and are copied to
+# FILE.ok; a total equal to the last accepted one is not sent again (0). The
+# file is removed when the server refused it (5, counted in dropped); kept for
+# the next hourly send when it failed (1) or the computer is not enrolled (3).
+_aionas_counters_send() {
+  if [ -f "$1.ok" ] && cmp -s "$1" "$1.ok"; then return 0; fi
+  _cs_body="$2/.body.$$"
+  aionas_counters_body <"$1" >"$_cs_body"
+  _cs_resp="$2/.resp.$$"
+  _cs_code=$(aionas_http POST /enroll/v1/savings/counters "$_cs_body" "$_cs_resp")
+  _cs_rc=$?
+  rm -f "$_cs_body" "$_cs_resp"
+  if [ $_cs_rc -eq 0 ]; then
+    awk -F '\t' -v today="$(aionas_day_utc)" '$1 >= today' "$1" >"$1.new"
+    if [ -s "$1.new" ]; then
+      mv -f "$1.new" "$1"
+      cp -f "$1" "$1.ok"
+    else
+      rm -f "$1.new" "$1" "$1.ok"
+    fi
     return 0
   fi
-  _cf_body="$_cf_dir/.body.$$"
-  aionas_counters_body <"$_cf_dir/pending.tsv" >"$_cf_body"
-  _cf_resp="$_cf_dir/.resp.$$"
-  _cf_code=$(aionas_http POST /enroll/v1/savings/counters "$_cf_body" "$_cf_resp")
-  _cf_rc=$?
-  rm -f "$_cf_body" "$_cf_resp"
-  if [ $_cf_rc -eq 0 ]; then
-    rm -f "$_cf_dir/pending.tsv"
-    echo "$_cf_now" | aionas_write_atomic "$_cf_dir/last_sent"
-    aionas_lock_release counters
-    return 0
-  fi
-  case "$_cf_code" in
+  case "$_cs_code" in
     400 | 413)
-      _cf_d=$(cat "$_cf_dir/dropped" 2>/dev/null)
-      aionas_is_uint "$_cf_d" || _cf_d=0
-      echo $((_cf_d + $(awk 'END { print NR }' "$_cf_dir/pending.tsv"))) | aionas_write_atomic "$_cf_dir/dropped"
-      rm -f "$_cf_dir/pending.tsv"
-      aionas_lock_release counters
+      _cs_d=$(cat "$2/dropped" 2>/dev/null)
+      aionas_is_uint "$_cs_d" || _cs_d=0
+      echo $((_cs_d + $(awk 'END { print NR }' "$1"))) | aionas_write_atomic "$2/dropped"
+      rm -f "$1" "$1.ok"
       return 5
       ;;
   esac
-  aionas_lock_release counters
-  [ $_cf_rc -eq 3 ] && return 3
+  [ $_cs_rc -eq 3 ] && return 3
   return 1
 }
 

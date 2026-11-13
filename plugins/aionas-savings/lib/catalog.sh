@@ -15,7 +15,9 @@ AIONAS_SUBAGENT_MODEL=sonnet
 AIONAS_DEFAULT_OFF_METHODS="output_trim"
 
 # The plugin's counters (AIO-855): numbers only, summed per UTC day.
-AIONAS_COUNTERS="fired skipped bypass"
+# compact_pressed (AIO-1023, handoff only): one per compaction started from the
+# band's /compact button; the gateway release v0.31.0 accepts the name.
+AIONAS_COUNTERS="fired skipped bypass compact_pressed"
 
 # aionas_is_method ID / aionas_is_required ID / aionas_is_default_off ID /
 # aionas_is_counter NAME

@@ -43,6 +43,7 @@ file plugins/aionas-savings/lib/json.sh
 file plugins/aionas-savings/lib/platform.sh
 file plugins/aionas-savings/lib/policy.awk
 file plugins/aionas-savings/lib/policy.sh
+file plugins/aionas-savings/lib/requests.sh
 file plugins/aionas-savings/lib/script-refresh.sh
 file plugins/aionas-savings/lib/time.awk
 file plugins/aionas-savings/lib/unused-json.awk
@@ -71,5 +72,6 @@ http GET /enroll/v1/scripts/manifest
 http POST /cc-quota/v1/samples
 http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
+http POST /enroll/v1/savings/requests
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run
 public GET /api/aionas/onboarding/scripts/

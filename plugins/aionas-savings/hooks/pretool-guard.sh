@@ -69,4 +69,6 @@ ctx=""
 [ -n "$note" ] && ctx=",\"additionalContext\":$(aionas_json_escape "$note")"
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":%s%s}}\n' "$input" "$ctx"
 aionas_counter_inc output_trim fired
+# The prompt it acted on is known at the turn's Stop (AIO-1004).
+aionas_request_mark "$sid" output_trim >/dev/null 2>&1
 exit 0

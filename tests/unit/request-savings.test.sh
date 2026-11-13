@@ -94,7 +94,7 @@ test_the_body_is_only_the_gateways_fields_whatever_the_queue_holds() {
     printf 'sess-1\tp2\toutput_trim\t%s\t300\tSECRET PROMPT\n' "$T0"
     printf 'sess-1\tSECRET PROMPT\toutput_trim\t%s\t1\n' "$T0"
     printf 'sess-1\tp3\tprompt_text\t%s\t1\n' "$T0"
-    printf 'sess-1\tp4\toutput_trim\tSECRET\t1\n' "$T0"
+    printf 'sess-1\tp4\toutput_trim\tSECRET\t1\n'
     printf 'sess-1\tp5\toutput_trim\t%s\tSECRET\n' "$T0"
   } >"$(RD)/queue.tsv"
   t_rc 0 aionas_requests_flush

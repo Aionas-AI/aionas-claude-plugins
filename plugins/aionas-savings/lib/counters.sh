@@ -5,10 +5,23 @@
 # as the policy sync (3 s connect, 5 s total, no retry). Only closed-list
 # names and whole numbers are ever queued or sent: never content.
 #
+# The server stores a counter's value as this computer's RUNNING TOTAL for
+# that UTC day and replaces it on each send (it never lowers it), so what is
+# sent is always the total, never an increment (AIO-1004, W31-30). Hooks only
+# append increments to queue.tsv (atomic, no lock); each flush folds the queue
+# into pending.tsv / compact.tsv, which hold the running totals per day, method
+# and counter, under the counters lock (so several Claude sessions on one
+# computer add up). After a confirmed send the rows of past UTC days are
+# pruned; today's total stays, to be repeated with whatever was added.
+#
 # Files under $(aionas_savings_dir)/counters:
 #   queue.tsv        appended by hooks: day method counter value
 #   batch.*          queue files taken by a flush
-#   pending.tsv      the summed rows not yet accepted by the server
+#   pending.tsv      the running totals (day method counter total); today's
+#                    stay after a send, past days are pruned once confirmed
+#   compact.tsv      the same for compact_pressed (sent in a request of its own)
+#   *.tsv.ok         a copy of the totals the server last accepted (an
+#                    unchanged total is not sent again)
 #   last_attempt     epoch of the last send attempt (the hourly clock)
 #   last_sent        epoch of the last accepted send
 #   dropped          rows the server refused (400/413), summed
@@ -96,11 +109,13 @@ aionas_counters_flush() {
   return $_cf_rc
 }
 
-# _aionas_counters_send FILE DIR: one request with the summed rows of FILE. The
-# file is removed when the server accepted it (0) or refused it (5, counted in
-# dropped); kept for the next hourly send when it failed (1) or the computer is
-# not enrolled (3).
+# _aionas_counters_send FILE DIR: one request with the running totals of FILE.
+# Accepted (0): past days are pruned, today's totals stay and are copied to
+# FILE.ok; a total equal to the last accepted one is not sent again (0). The
+# file is removed when the server refused it (5, counted in dropped); kept for
+# the next hourly send when it failed (1) or the computer is not enrolled (3).
 _aionas_counters_send() {
+  if [ -f "$1.ok" ] && cmp -s "$1" "$1.ok"; then return 0; fi
   _cs_body="$2/.body.$$"
   aionas_counters_body <"$1" >"$_cs_body"
   _cs_resp="$2/.resp.$$"
@@ -108,7 +123,13 @@ _aionas_counters_send() {
   _cs_rc=$?
   rm -f "$_cs_body" "$_cs_resp"
   if [ $_cs_rc -eq 0 ]; then
-    rm -f "$1"
+    awk -F '\t' -v today="$(aionas_day_utc)" '$1 >= today' "$1" >"$1.new"
+    if [ -s "$1.new" ]; then
+      mv -f "$1.new" "$1"
+      cp -f "$1" "$1.ok"
+    else
+      rm -f "$1.new" "$1" "$1.ok"
+    fi
     return 0
   fi
   case "$_cs_code" in
@@ -116,7 +137,7 @@ _aionas_counters_send() {
       _cs_d=$(cat "$2/dropped" 2>/dev/null)
       aionas_is_uint "$_cs_d" || _cs_d=0
       echo $((_cs_d + $(awk 'END { print NR }' "$1"))) | aionas_write_atomic "$2/dropped"
-      rm -f "$1"
+      rm -f "$1" "$1.ok"
       return 5
       ;;
   esac

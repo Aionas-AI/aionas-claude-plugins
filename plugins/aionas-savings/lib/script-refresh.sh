@@ -65,3 +65,34 @@ aionas_sr_stamp() {
   tr -d '\r' <"$1" 2>/dev/null | LC_ALL=C grep -a -m 1 -E "$_sr_pat" | sed -e "s/^[^']*'//" -e "s/'\$//"
   return 0
 }
+
+# aionas_sr_allowed ALLOWLIST NAME FILE TMP (AIO-1072, finding 2): exit 0 only
+# when the script in FILE is one the plugin release vouches for. The gateway
+# serves the script with its release stamp written into the one release line
+# (the line aionas_sr_stamp reads), so that line is set back to the
+# placeholder __AIONAS_RELEASE__ (into TMP, removed here), and the sha256 of
+# the result must be listed for NAME in ALLOWLIST ("<name> <sha256>" lines,
+# shipped inside the plugin; # comments). The gateway can then pick the stamp,
+# never the code. No allow-list, no hash tool or no match: exit 1.
+aionas_sr_allowed() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  case "$2" in *.ps1) _sa_k=ps ;; *) _sa_k=sh ;; esac
+  (umask 077; set -C; : >"$4") 2>/dev/null || return 1
+  # The lines are written joined by "\n"; a final newline is added back only
+  # when FILE ends with one (awk would add it), so the bytes stay the same.
+  LC_ALL=C awk -v k="$_sa_k" '
+    {
+      l = $0; cr = ""
+      if (substr(l, length(l)) == "\r") { cr = "\r"; l = substr(l, 1, length(l) - 1) }
+      if (!done) {
+        if (k == "ps" && l ~ /^[$]AIONAS_RELEASE = \047[^\047]*\047$/) { l = "$AIONAS_RELEASE = \047__AIONAS_RELEASE__\047"; done = 1 }
+        else if (k == "sh" && l ~ /^AIONAS_RELEASE=\047[^\047]*\047$/) { l = "AIONAS_RELEASE=\047__AIONAS_RELEASE__\047"; done = 1 }
+      }
+      printf "%s%s%s", (NR > 1 ? "\n" : ""), l, cr
+    }' "$3" >>"$4" 2>/dev/null || { rm -f "$4"; return 1; }
+  [ -n "$(tail -c 1 "$3" 2>/dev/null)" ] || printf '\n' >>"$4"
+  _sa_h=$(aionas_sr_sha256 "$4")
+  rm -f "$4"
+  [ -n "$_sa_h" ] || return 1
+  LC_ALL=C awk -v n="$2" -v h="$_sa_h" '$1 == n && $2 == h && NF == 2 { f = 1 } END { exit f ? 0 : 1 }' "$1"
+}

@@ -156,15 +156,7 @@ aionas_up_bin_version() {
 # savings/counters, NOT the queue: the gateway's counter list does not know
 # these names and rejects the whole batch (and the flush then drops every
 # pending row), so it never goes through aionas_counter_inc.
-aionas_up_count() {
-  _tl_d="$(aionas_savings_dir)/counters"
-  aionas_mkdir "$_tl_d" || return 0
-  _tl_n=$(cat "$_tl_d/$1" 2>/dev/null)
-  aionas_is_uint "${_tl_n:-x}" || _tl_n=0
-  [ "$_tl_n" -lt 1000000000 ] || return 0
-  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/$1"
-  return 0
-}
+aionas_up_count() { aionas_local_count "$1"; }
 aionas_up_too_large() { aionas_up_count usage_probe_too_large; }
 aionas_up_bad_text() { aionas_up_count usage_probe_bad_text; }
 

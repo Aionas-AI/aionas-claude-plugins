@@ -115,6 +115,19 @@ aionas_lock_release() {
   return 0
 }
 
+# aionas_local_count NAME: add one to a local number under savings/counters/NAME.
+# Never sent: the gateway's closed counter list does not know these names (it
+# would reject the whole batch), so it never goes through aionas_counter_inc.
+aionas_local_count() {
+  _tl_d="$(aionas_savings_dir)/counters"
+  aionas_mkdir "$_tl_d" || return 0
+  _tl_n=$(cat "$_tl_d/$1" 2>/dev/null)
+  aionas_is_uint "${_tl_n:-x}" || _tl_n=0
+  [ "$_tl_n" -lt 1000000000 ] || return 0
+  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/$1"
+  return 0
+}
+
 # aionas_is_uint VALUE: a non-negative integer of at most 15 digits.
 aionas_is_uint() {
   case "$1" in '' | *[!0-9]*) return 1 ;; esac

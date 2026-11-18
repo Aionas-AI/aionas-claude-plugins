@@ -51,6 +51,7 @@ file plugins/aionas-savings/lib/unused-usage.awk
 file plugins/aionas-savings/lib/unused.sh
 file plugins/aionas-savings/lib/usage-probe.sh
 file plugins/aionas-savings/rules/guard-store.tsv
+file plugins/aionas-savings/security/script-allowlist.txt
 file plugins/aionas-savings/tsconfig.json
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/daily-scan.sh\""

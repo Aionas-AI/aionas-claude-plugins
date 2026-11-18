@@ -54,7 +54,9 @@ test_the_header_file_has_an_unpredictable_name_and_is_removed() {
   t_enroll
   aionas_http GET /enroll/v1/savings/policy - "$HOME/o" >/dev/null
   local h; h=$(grep '^@' "$FAKE_CURL_LOG/1/args" | head -1); h=${h#@}
-  case "${h##*/}" in .auth.[0-9]*) t_fail "predictable header name [$h]" ;; .auth.??????*) ;; *) t_fail "header [$h]" ;; esac
+  local b=${h##*/}
+  case "${b#.auth.}" in *[!0-9]*) ;; *) t_fail "predictable header name (a pid) [$h]" ;; esac
+  case "$b" in .auth.??????) ;; *) t_fail "header [$h]" ;; esac
   t_not test -e "$h"
   t_contains "$(t_call 1 headers)" "Authorization: Bearer $T_ALIAS"
 }

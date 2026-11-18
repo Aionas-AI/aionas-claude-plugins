@@ -164,4 +164,44 @@ test_a_big_file_is_fast_enough() {
   [ $((e - s)) -le 4 ] || t_fail "a $(wc -c <"$f") byte file took $((e - s)) s"
 }
 
+# AIO-1072, finding 9: the settings file is written only if it is unchanged
+# since it was read, and a symlinked file is never truncated in place.
+inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1"; }
+
+test_aio1072_a_symlinked_file_is_replaced_at_its_target_never_truncated_in_place() {
+  local real ino
+  real=$(put real.json '{"a":1}'); chmod 640 "$real"
+  ln -s real.json "$HOME/link.json"
+  ino=$(inode "$real")
+  t_rc 0 aionas_unused_jedit "$HOME/link.json" set-str off skillOverrides s
+  t_ok test -L "$HOME/link.json"
+  t_eq '{"a":1,"skillOverrides":{"s":"off"}}' "$(cat "$real")"
+  [ "$(inode "$real")" != "$ino" ] || t_fail "the target was written in place"
+  t_eq 640 "$(t_mode "$real")"
+  t_eq "" "$(find "$HOME" -name '*.aionas-tmp.*')"
+}
+
+test_aio1072_a_link_to_a_link_is_left_unchanged() {
+  local real; real=$(put real.json '{"a":1}')
+  ln -s "$real" "$HOME/l1.json"; ln -s "$HOME/l1.json" "$HOME/l2.json"
+  t_not aionas_unused_jedit "$HOME/l2.json" set-str off skillOverrides s
+  t_eq '{"a":1}' "$(cat "$real")"
+}
+
+test_aio1072_a_change_made_while_it_was_read_is_never_overwritten() {
+  local f; f=$(put s.json '{"a":1}')
+  # another Claude session writes the file between the read and the swap
+  _uu_pre_swap() { printf '{"a":2,"mine":true}' >"$1"; }
+  t_not aionas_unused_jedit "$f" set-str off skillOverrides s
+  t_eq '{"a":2,"mine":true}' "$(cat "$f")"
+  t_eq "" "$(find "$HOME" -name '*.aionas-tmp.*')"
+  # touched but the same bytes: the mtime still differs, still left alone
+  _uu_pre_swap() { sleep 1; touch "$1"; }
+  t_not aionas_unused_jedit "$f" set-str off skillOverrides s
+  t_eq '{"a":2,"mine":true}' "$(cat "$f")"
+  _uu_pre_swap() { :; }
+  t_rc 0 aionas_unused_jedit "$f" set-str off skillOverrides s
+  t_eq '{"a":2,"mine":true,"skillOverrides":{"s":"off"}}' "$(cat "$f")"
+}
+
 t_main "$@"

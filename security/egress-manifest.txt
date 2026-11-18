@@ -1,3 +1,4 @@
+delegated plugins/aionas-savings/hooks/daily-scan.sh: aionas-scan --incremental -> POST /enroll/v1/savings/retro with the enrollment alias: run{source,mode,status,sessions,scanner_version}, totals[]{day,repo,project_path,kind,key,count,sessions,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,tokens,cost_usd}
 file plugins/aionas-savings/.claude-plugin/plugin.json
 file plugins/aionas-savings/CHANGELOG.md
 file plugins/aionas-savings/README.md
@@ -42,6 +43,7 @@ file plugins/aionas-savings/lib/unused-json.awk
 file plugins/aionas-savings/lib/unused-usage.awk
 file plugins/aionas-savings/lib/unused.sh
 file plugins/aionas-savings/lib/usage-probe.sh
+file plugins/aionas-savings/security/script-allowlist.txt
 file plugins/aionas-savings/tsconfig.json
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/daily-scan.sh\""
@@ -65,3 +67,5 @@ http POST /enroll/v1/savings/overrides
 http POST /enroll/v1/savings/requests
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run
 public GET /api/aionas/onboarding/scripts/
+run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental
+run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental

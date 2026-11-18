@@ -9,7 +9,15 @@
 # The scanner is looked up as: $AIONAS_SCAN_BIN, then
 # ~/.aionas/agent/tools/aionas-scan (where the installer puts it; aionas-scan.exe
 # on Windows), then ~/.aionas/agent/bin/aionas-scan, never PATH: a project or package
-# could put its own aionas-scan there and have it run detached.
+# could put its own aionas-scan there and have it run detached. Nothing else is
+# run from PATH either: nice is /usr/bin/nice when there is one, and the hangup
+# is ignored with trap instead of nohup (AIO-1072).
+#
+# The upload is the scanner's, not this hook's (AIO-1072, finding 7): the line
+# below is what it sends, and tests/security/egress-manifest.sh lists it as
+# "delegated" in security/egress-manifest.txt, next to the one program this
+# hook starts ("run"), so a change to either shows up in review.
+AIONAS_SCAN_EGRESS='aionas-scan --incremental -> POST /enroll/v1/savings/retro with the enrollment alias: run{source,mode,status,sessions,scanner_version}, totals[]{day,repo,project_path,kind,key,count,sessions,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,tokens,cost_usd}'
 # Prints nothing, exits 0.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
@@ -38,11 +46,12 @@ today=$(aionas_day_utc)
 aionas_lock_try daily-scan 300 || exit 0
 if [ "$(cat "$dir/scan.day" 2>/dev/null)" != "$today" ]; then
   printf '%s\n' "$today" | aionas_write_atomic "$dir/scan.day"
-  nice_cmd=""
-  command -v nice >/dev/null 2>&1 && nice_cmd="nice -n 19"
   # Detached: stdio closed, immune to the session's hangup; this hook returns now.
-  # shellcheck disable=SC2086
-  (cd "$dir" && exec nohup $nice_cmd "$bin" --incremental </dev/null >/dev/null 2>&1) &
+  if [ -x /usr/bin/nice ]; then
+    (cd "$dir" && trap '' HUP && exec /usr/bin/nice -n 19 "$bin" --incremental </dev/null >/dev/null 2>&1) &
+  else
+    (cd "$dir" && trap '' HUP && exec "$bin" --incremental </dev/null >/dev/null 2>&1) &
+  fi
 fi
 aionas_lock_release daily-scan
 exit 0

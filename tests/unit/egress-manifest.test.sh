@@ -66,4 +66,37 @@ test_band_names_drop_c1_and_bidi_controls() {
   t_eq "me	ab cd [31mx y	o raw	-	-	-" "$(aionas_band_policy "$f")"
 }
 
+# AIO-1072, finding 7: the scanner's delegated upload is in the manifest, and
+# daily-scan.sh starts no program but the scanner.
+test_aio1072_the_scanners_delegated_upload_is_listed() {
+  local m; m=$(cat "$T_REPO/security/egress-manifest.txt")
+  t_contains "$m" 'delegated plugins/aionas-savings/hooks/daily-scan.sh: aionas-scan --incremental -> POST /enroll/v1/savings/retro'
+  t_contains "$m" 'totals[]{day,repo,project_path,kind,key,count,sessions,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,tokens,cost_usd}'
+  t_contains "$m" 'run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental'
+  t_eq "" "$(grep '^run plugins/aionas-savings/hooks/daily-scan.sh: ' "$T_REPO/security/egress-manifest.txt" |
+    grep -vxF -e 'run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental' \
+      -e 'run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental')" "only the scanner is started"
+}
+
+test_aio1072_another_program_started_by_daily_scan_is_listed() {
+  t_contains "$(planted '(exec /usr/bin/python3 -c x) &' hooks/daily-scan.sh)" \
+    'run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/python3 -c x'
+}
+
+test_aio1072_daily_scan_starts_only_the_scanner_and_nothing_from_path() {
+  t_fresh; t_enroll
+  local trip="$HOME/trip" t
+  mkdir -p "$trip" "$HOME/.aionas/agent/tools"
+  for t in curl wget nc ncat socat ssh scp python python3 node perl ruby nice nohup env aionas-scan; do
+    printf '#!/bin/sh\necho %s >>"%s/tripped"\n' "$t" "$HOME" >"$trip/$t"; chmod +x "$trip/$t"
+  done
+  printf '#!/bin/sh\necho "$*" >"%s/scan-args"\n' "$HOME" >"$HOME/.aionas/agent/tools/aionas-scan"
+  chmod +x "$HOME/.aionas/agent/tools/aionas-scan"
+  PATH="$trip:$PATH" bash "$T_PLUGIN/hooks/daily-scan.sh" </dev/null
+  local i=0; while [ ! -f "$HOME/scan-args" ] && [ $i -lt 25 ]; do sleep 0.2; i=$((i + 1)); done
+  t_eq "--incremental" "$(cat "$HOME/scan-args" 2>/dev/null)" "the scanner ran"
+  t_eq "" "$(cat "$HOME/tripped" 2>/dev/null)" "nothing else ran from PATH"
+  t_eq 0 "$(t_calls)" "no request of the hook's own"
+}
+
 t_main "$@"

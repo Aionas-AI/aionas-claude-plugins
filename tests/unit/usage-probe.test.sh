@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # hooks/usage-probe.sh: the weekly figure from Claude Code's own /usage for a
 # member who never renders the status line (AIO-892). Every test builds its own
-# PATH (a stub claude, then /usr/bin:/bin) and its own HOME, so a real claude
-# login is never run. The stub never calls a model.
+# HOME with a stub claude at the native installer's place (~/.local/bin/claude;
+# claude is never taken from PATH, AIO-1072) and its own PATH (tripwires, then
+# /usr/bin:/bin), so a real claude login is never run. The stub never calls a
+# model. The child gets a minimal environment, so the stub reads its STUB_*
+# settings from $HOME/.stub-env, which hook() writes.
 . "$(dirname "$0")/../lib/harness.sh"
 
 HOOK="$T_PLUGIN/hooks/usage-probe.sh"
@@ -12,9 +15,10 @@ ORGUUID=11111111-2222-3333-4444-555555555555
 epoch_of() { awk -v mode=epoch -v iso="$1" -f "$T_PLUGIN/lib/time.awk"; }
 NOW0=$(epoch_of 2026-11-01T00:00:00Z)
 
-# up_setup: an enrolled computer with a Claude login file, a private PATH that
-# holds only the stub claude (and tripwires for env, timeout and perl, which
-# the probe must never run from PATH), a pinned clock and the real 2.1.311 capture.
+# up_setup: an enrolled computer with a Claude login file, the stub claude at
+# ~/.local/bin/claude, a private PATH that holds tripwires for env, timeout and
+# perl (which the probe must never run from PATH), a pinned clock and the real
+# 2.1.311 capture.
 up_setup() {
   t_enroll
   STUB=$(mktemp -d "$T_ROOT/stub.XXXXXX"); STUB_LOG=$(mktemp -d "$T_ROOT/stublog.XXXXXX")
@@ -24,7 +28,8 @@ up_setup() {
   export STUB_OUTPUT="$FIX/usage-2.1.311-real-capture.json"
   unset STUB_MODE STUB_DELAY STUB_HOOK_LIST AIONAS_USAGE_PROBE AIONAS_USAGE_PROBE_TIMEOUT
   export TZ=UTC
-  install_stub "$STUB/claude"
+  CLAUDE_BIN="$HOME/.local/bin/claude"
+  install_stub "$CLAUDE_BIN"
   local t
   for t in env timeout perl; do
     printf '#!/bin/bash\necho "$0" >>"%s/forbidden"\nexit 127\n' "$STUB_LOG" >"$STUB/$t"
@@ -38,7 +43,16 @@ claude_json() {
 {"userID":"SECRET-USER-ID","oauthAccount":{"accountUuid":"$UUID","emailAddress":"CANARY-EMAIL@example.com","billingType":"$1","organizationType":"claude_team","organizationRateLimitTier":"default_claude_ai","organizationUuid":"$ORGUUID","organizationName":"Example Org"}}
 JSON
 }
-hook() { printf '{"session_id":"s1","hook_event_name":"SessionStart","source":"startup"}' | bash "$HOOK"; }
+# stub_env: the STUB_* settings (and the fake curl's log) for the stub claude.
+stub_env() {
+  local v
+  : >"$HOME/.stub-env"
+  for v in STUB_LOG STUB_OUTPUT STUB_MODE STUB_DELAY STUB_HOOK_LIST FAKE_CURL_LOG; do
+    [ -n "${!v+x}" ] && printf 'export %s=%q\n' "$v" "${!v}" >>"$HOME/.stub-env"
+  done
+  return 0
+}
+hook() { stub_env; printf '{"session_id":"s1","hook_event_name":"SessionStart","source":"startup"}' | bash "$HOOK"; }
 runs() { find "$STUB_LOG" -mindepth 1 -maxdepth 1 -type d -name 'run.*' | wc -l | tr -d ' '; }
 agent() { aionas_agent_dir; }
 pdir() { echo "$(agent)/state/usage-probe"; }
@@ -106,7 +120,7 @@ json" "$(cat "$d/argv")"
   t_lacks "$(cat "$d/argv")" "--bare"
   t_eq eof "$(cat "$d/stdin")" "the child's stdin is /dev/null"
   t_eq "$(cd "$(pdir)" && pwd -P)" "$(cd "$(cat "$d/cwd")" && pwd -P)" "cwd = the fixed private dir"
-  t_eq "$STUB/claude" "$(cat "$d/argv0")"
+  t_eq "$CLAUDE_BIN" "$(cat "$d/argv0")"
 }
 
 test_the_state_dir_is_private_and_nothing_is_left_in_it() {
@@ -381,12 +395,12 @@ test_there_is_no_unparsed_counter_and_no_parser_left() {
 
 test_claude_version_is_sent_only_when_the_path_already_names_it() {
   up_setup
-  # claude on PATH: nothing names the version, no extra run to ask
+  # the native install: nothing names the version, no extra run to ask
   hook
   t_lacks "$(body)" claude_version
   t_eq 1 "$(runs)" "no --version run"
   # the Desktop bundle: the version folder
-  rm -f "$STUB/claude"; as_mac
+  rm -f "$CLAUDE_BIN"; as_mac
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
   fresh_hour; hook
   t_eq 2 "$(runs)" "still one run per probe"
@@ -451,7 +465,7 @@ test_a_stale_or_unreadable_status_line_figure_does_not_stop_the_probe() {
 
 test_no_binary_means_no_request_and_no_stamp() {
   up_setup
-  rm -f "$STUB/claude"
+  rm -f "$CLAUDE_BIN"
   hook; t_eq 0 $? "exit 0"
   t_eq 0 "$(t_calls)"
   t_not test -f "$(stamp)"
@@ -460,21 +474,21 @@ test_no_binary_means_no_request_and_no_stamp() {
 
 test_a_directory_or_non_executable_named_claude_is_not_a_binary() {
   up_setup
-  rm -f "$STUB/claude"
-  mkdir "$STUB/claude"
+  rm -f "$CLAUDE_BIN"
+  mkdir "$CLAUDE_BIN"
   hook; t_eq 0 "$(runs)"; t_eq 0 "$(t_calls)"
-  rmdir "$STUB/claude"
-  install_stub "$STUB/claude"; chmod -x "$STUB/claude"
+  rmdir "$CLAUDE_BIN"
+  install_stub "$CLAUDE_BIN"; chmod -x "$CLAUDE_BIN"
   hook; t_eq 0 "$(runs)"; t_eq 0 "$(t_calls)"
 }
 
-test_path_claude_wins_over_the_bundled_ones() {
+test_the_native_install_wins_over_the_bundled_ones() {
   up_setup
   export AIONAS_UNAME=$STUB/uname; printf '#!/bin/bash\necho Darwin\n' >"$AIONAS_UNAME"; chmod +x "$AIONAS_UNAME"
   install_stub "$HOME/Library/Application Support/Claude/claude-code/2.1.308/a93ded4b1b47/claude.app/Contents/MacOS/claude"
   install_stub "$HOME/.vscode/extensions/anthropic.claude-code-2.1.400-darwin-arm64/resources/native-binary/claude"
   hook
-  t_eq "$STUB/claude" "$(cat "$STUB_LOG/run.1/argv0")"
+  t_eq "$CLAUDE_BIN" "$(cat "$STUB_LOG/run.1/argv0")"
 }
 
 desktop() { echo "$HOME/Library/Application Support/Claude/claude-code/$1/$2/claude.app/Contents/MacOS/claude"; }
@@ -483,7 +497,7 @@ as_mac() { export AIONAS_UNAME=$STUB/uname; printf '#!/bin/bash\necho Darwin\n' 
 as_linux() { export AIONAS_UNAME=$STUB/uname; printf '#!/bin/bash\necho Linux\n' >"$AIONAS_UNAME"; chmod +x "$AIONAS_UNAME"; }
 
 test_desktop_bundle_is_found_in_its_real_layout_with_a_space_in_the_path() {
-  up_setup; rm -f "$STUB/claude"; as_mac
+  up_setup; rm -f "$CLAUDE_BIN"; as_mac
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
   hook
   t_eq 1 "$(runs)"
@@ -492,7 +506,7 @@ test_desktop_bundle_is_found_in_its_real_layout_with_a_space_in_the_path() {
 }
 
 test_desktop_newest_version_is_by_version_number_not_by_text_or_mtime() {
-  up_setup; rm -f "$STUB/claude"; as_mac
+  up_setup; rm -f "$CLAUDE_BIN"; as_mac
   install_stub "$(desktop 2.1.99 aaaaaaaaaaaa)"
   install_stub "$(desktop 2.1.100 bbbbbbbbbbbb)"
   install_stub "$(desktop 2.0.200 cccccccccccc)"
@@ -504,7 +518,7 @@ test_desktop_newest_version_is_by_version_number_not_by_text_or_mtime() {
 }
 
 test_desktop_skips_odd_names_and_versions_with_no_executable() {
-  up_setup; rm -f "$STUB/claude"; as_mac
+  up_setup; rm -f "$CLAUDE_BIN"; as_mac
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
   install_stub "$(desktop 2.1.309-beta eeeeeeeeeeee)"
   install_stub "$HOME/Library/Application Support/Claude/claude-code/latest/ffffffffffff/claude.app/Contents/MacOS/claude"
@@ -515,7 +529,7 @@ test_desktop_skips_odd_names_and_versions_with_no_executable() {
 }
 
 test_desktop_rejects_a_symlinked_version_dir_or_binary_component() {
-  up_setup; rm -f "$STUB/claude"; as_mac
+  up_setup; rm -f "$CLAUDE_BIN"; as_mac
   local base="$HOME/Library/Application Support/Claude/claude-code"
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
   # a newer version dir that is a symlink to a real tree holding a binary
@@ -538,7 +552,7 @@ test_desktop_rejects_a_symlinked_version_dir_or_binary_component() {
 }
 
 test_desktop_prefers_a_version_dir_with_a_verified_file() {
-  up_setup; rm -f "$STUB/claude"; as_mac
+  up_setup; rm -f "$CLAUDE_BIN"; as_mac
   install_stub "$(desktop 2.1.100 aaaaaaaaaaaa)"
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
   : >"$(dirname "$(desktop 2.1.100 aaaaaaaaaaaa)")/../../../.verified"
@@ -557,14 +571,14 @@ test_desktop_prefers_a_version_dir_with_a_verified_file() {
 }
 
 test_desktop_is_looked_up_on_macos_only() {
-  up_setup; rm -f "$STUB/claude"; as_linux
+  up_setup; rm -f "$CLAUDE_BIN"; as_linux
   install_stub "$(desktop 2.1.308 a93ded4b1b47)"
   hook
   t_eq 0 "$(runs)"
 }
 
 test_vscode_extension_is_the_last_fallback_and_also_picked_by_version() {
-  up_setup; rm -f "$STUB/claude"; as_mac
+  up_setup; rm -f "$CLAUDE_BIN"; as_mac
   install_stub "$(vscode 2.1.99-darwin-arm64)"
   install_stub "$(vscode 2.1.100-darwin-arm64)"
   install_stub "$HOME/.vscode/extensions/other.ext-9.9.9/resources/native-binary/claude"
@@ -579,7 +593,7 @@ test_vscode_extension_is_the_last_fallback_and_also_picked_by_version() {
 }
 
 test_vscode_extension_on_linux() {
-  up_setup; rm -f "$STUB/claude"; as_linux
+  up_setup; rm -f "$CLAUDE_BIN"; as_linux
   install_stub "$(vscode 2.1.100-linux-x64)"
   hook
   t_eq "$(vscode 2.1.100-linux-x64)" "$(cat "$STUB_LOG/run.1/argv0")"
@@ -698,6 +712,7 @@ test_a_slow_child_within_the_timeout_still_counts() {
 test_a_term_sent_to_the_hook_takes_the_child_down() {
   up_setup
   export STUB_MODE=hang
+  stub_env
   printf '{"session_id":"s1"}' | bash "$HOOK" &
   local hp=$! i=0
   while [ ! -f "$STUB_LOG/run.1/pid" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
@@ -752,6 +767,66 @@ test_session_hook_entry_is_async_with_room_for_the_probe() {
 
 test_the_api_key_mode_flag_is_never_in_the_code() {
   t_not grep -rn -e '--bare' "$T_PLUGIN/hooks/usage-probe.sh" "$T_PLUGIN/lib/usage-probe.sh"
+}
+
+# AIO-1072, finding 3: claude is taken from known install places only, never
+# from PATH and never from inside the workspace, and runs with a minimal
+# environment.
+test_aio1072_a_claude_on_path_is_never_run() {
+  up_setup
+  rm -f "$CLAUDE_BIN"
+  printf '#!/bin/bash\n: >"%s/PATH-CLAUDE-RAN"\n' "$STUB_LOG" >"$STUB/claude"; chmod +x "$STUB/claude"
+  hook; t_eq 0 $? "exit 0"
+  t_not test -e "$STUB_LOG/PATH-CLAUDE-RAN"
+  t_eq 0 "$(runs)"; t_eq 0 "$(t_calls)"
+}
+
+test_aio1072_a_fake_claude_first_on_path_inside_the_workspace_is_never_run() {
+  up_setup
+  local ws; ws=$(mktemp -d "$T_ROOT/ws.XXXXXX")
+  mkdir -p "$ws/node_modules/.bin"
+  printf '#!/bin/bash\n: >"%s/WS-CLAUDE-RAN"\n' "$STUB_LOG" >"$ws/node_modules/.bin/claude"
+  chmod +x "$ws/node_modules/.bin/claude"
+  (cd "$ws" && PATH="$ws/node_modules/.bin:$PATH" hook)
+  t_not test -e "$STUB_LOG/WS-CLAUDE-RAN"
+  t_eq 1 "$(runs)" "the native install ran instead"
+  t_eq "$CLAUDE_BIN" "$(cat "$STUB_LOG/run.1/argv0")"
+}
+
+test_aio1072_a_known_place_inside_the_workspace_is_refused() {
+  up_setup
+  # the workspace holds the native installer's place (cwd, or the project dir)
+  (cd "$HOME/.local" && hook)
+  t_eq 0 "$(runs)" "cwd"
+  fresh_hour
+  (CLAUDE_PROJECT_DIR="$HOME/.local/bin" hook)
+  t_eq 0 "$(runs)" "CLAUDE_PROJECT_DIR"
+  t_eq 0 "$(t_calls)"
+  # a session started in the home folder itself still probes
+  fresh_hour
+  (cd "$HOME" && hook)
+  t_eq 1 "$(runs)" "home folder"
+}
+
+test_aio1072_a_symlink_into_the_workspace_is_refused() {
+  up_setup
+  local ws; ws=$(mktemp -d "$T_ROOT/ws.XXXXXX")
+  mv "$CLAUDE_BIN" "$ws/claude"; ln -s "$ws/claude" "$CLAUDE_BIN"
+  (cd "$ws" && hook)
+  t_eq 0 "$(runs)"
+}
+
+test_aio1072_the_child_gets_a_minimal_environment() {
+  up_setup
+  export SECRET_TOKEN_X=s3cr3t NODE_OPTIONS=--require=/tmp/evil.js DYLD_INSERT_LIBRARIES=/tmp/evil.dylib
+  hook
+  local e; e=$(cat "$STUB_LOG/run.1/allenv")
+  t_lacks "$e" SECRET_TOKEN_X; t_lacks "$e" NODE_OPTIONS; t_lacks "$e" DYLD_INSERT
+  t_lacks "$e" AIONAS_CURL; t_lacks "$e" STUB_LOG
+  t_contains "$e" "PATH=/usr/bin:/bin:/usr/sbin:/sbin"
+  t_contains "$e" "HOME=$HOME"
+  t_contains "$e" "AIONAS_USAGE_PROBE=1"
+  t_eq 1 "$(t_calls)" "the sample is still sent"
 }
 
 t_main "$@"

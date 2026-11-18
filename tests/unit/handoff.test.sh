@@ -513,4 +513,47 @@ test_command_allows_only_the_prepare_call() {
   t_eq 1 "$(printf '%s' "$line" | grep -o 'Bash(' | wc -l | tr -d ' ')" "exactly one Bash rule"
 }
 
+# AIO-1072, finding 4: the Windows launcher holds paths as data. cmd.exe
+# expands %NAME% even inside double quotes, so every % is written as %%
+# (which a batch file reads back as one %), and a value cmd cannot quote
+# safely (a double quote, a line break) means no .cmd is written.
+as_windows() {
+  local u; u=$(mktemp "$T_ROOT/uname.XXXXXX")
+  printf '#!/bin/sh\necho MINGW64_NT-10.0-19045\n' >"$u"; chmod +x "$u"
+  export AIONAS_UNAME=$u
+}
+# cmd_value LINE: the text between the first pair of double quotes, as cmd.exe
+# reads it in a batch file (%% -> %); exit 1 when a single % is left.
+cmd_value() {
+  local q=${1#*\"}; q=${q%%\"*}
+  [ -z "$(printf '%s' "$q" | sed 's/%%//g' | tr -cd '%')" ] || return 1
+  printf '%s' "$q" | sed 's/%%/%/g'
+}
+
+test_aio1072_windows_launcher_round_trips_a_percent_dir() {
+  as_windows
+  . "$HOOKS/handoff-wake.sh"
+  local cwd="$HOME/a%PATH%b"; mkdir -p "$cwd"
+  aionas_mkdir "$(hdir)"
+  aionas_handoff_write_opener "$SID" "$cwd" >/dev/null
+  local f="$(hdir)/opener-$SID.cmd" cd_line cl_line v
+  t_ok test -f "$f"
+  cd_line=$(grep '^cd /d ' "$f" | tr -d '\r')
+  v=$(cmd_value "$cd_line") || t_fail "a single % in [$cd_line]"
+  t_eq "$cwd" "$v" "a%PATH%b round-trips unchanged"
+  cl_line=$(grep '^claude ' "$f" | tr -d '\r')
+  t_eq "" "$(printf '%s' "$cl_line" | sed 's/%%//g' | tr -cd '%')" "no single % on the claude line"
+}
+
+test_aio1072_windows_launcher_is_not_written_for_a_value_cmd_cannot_quote() {
+  as_windows
+  . "$HOOKS/handoff-wake.sh"
+  local cwd="$HOME/a\"b"; mkdir -p "$cwd"
+  aionas_mkdir "$(hdir)"
+  printf 'old' >"$(hdir)/opener-$SID.cmd"
+  aionas_handoff_write_opener "$SID" "$cwd" >/dev/null
+  t_not test -e "$(hdir)/opener-$SID.cmd"
+  t_ok test -x "$(hdir)/opener-$SID.sh"
+}
+
 t_main "$@"

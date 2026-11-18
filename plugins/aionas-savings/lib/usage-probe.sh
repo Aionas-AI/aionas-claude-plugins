@@ -106,21 +106,31 @@ aionas_up_phys() { (cd "$1" 2>/dev/null && pwd -P); }
 # not one here (every known place is under it). A path that cannot be
 # resolved counts as inside.
 aionas_up_in_workspace() {
-  _iw_d=$(aionas_up_phys "$(dirname "$1")") || return 0
-  _iw_t=$_iw_d
-  if [ -L "$1" ]; then
-    _iw_l=$(readlink "$1" 2>/dev/null) || return 0
-    case "$_iw_l" in /*) ;; *) _iw_l="$(dirname "$1")/$_iw_l" ;; esac
+  # Every folder on the whole symlink chain (at most 40 hops; more, or a
+  # cycle, counts as inside) must lie outside the workspace.
+  _iw_dirs=$(aionas_up_phys "$(dirname "$1")") || return 0
+  _iw_p=$1 _iw_n=0
+  while [ -L "$_iw_p" ]; do
+    _iw_n=$((_iw_n + 1)); [ "$_iw_n" -le 40 ] || return 0
+    _iw_l=$(readlink "$_iw_p" 2>/dev/null) || return 0
+    case "$_iw_l" in /*) ;; *) _iw_l="$(dirname "$_iw_p")/$_iw_l" ;; esac
     _iw_t=$(aionas_up_phys "$(dirname "$_iw_l")") || return 0
-  fi
+    _iw_p="$_iw_t/$(basename "$_iw_l")"
+    _iw_dirs="$_iw_dirs
+$_iw_t"
+  done
   _iw_h=$(aionas_up_phys "$(aionas_home)") || return 0
   for _iw_w in "$PWD" "${CLAUDE_PROJECT_DIR:-}"; do
     [ -n "$_iw_w" ] || continue
     _iw_w=$(aionas_up_phys "$_iw_w") || continue
     [ "$_iw_w" = "$_iw_h" ] && continue
     [ "$_iw_w" = / ] && return 0
-    case "$_iw_d/" in "$_iw_w"/*) return 0 ;; esac
-    case "$_iw_t/" in "$_iw_w"/*) return 0 ;; esac
+    _iw_ifs=$IFS; IFS='
+'
+    for _iw_x in $_iw_dirs; do
+      case "$_iw_x/" in "$_iw_w"/*) IFS=$_iw_ifs; return 0 ;; esac
+    done
+    IFS=$_iw_ifs
   done
   return 1
 }

@@ -816,6 +816,14 @@ test_aio1072_a_symlink_into_the_workspace_is_refused() {
   t_eq 0 "$(runs)"
 }
 
+test_aio1072_a_two_hop_symlink_into_the_workspace_is_refused() {
+  up_setup
+  local ws out; ws=$(mktemp -d "$T_ROOT/ws.XXXXXX"); out=$(mktemp -d "$T_ROOT/out.XXXXXX")
+  mv "$CLAUDE_BIN" "$ws/claude"; ln -s "$ws/claude" "$out/claude-link"; ln -s "$out/claude-link" "$CLAUDE_BIN"
+  (cd "$ws" && hook)
+  t_eq 0 "$(runs)"
+}
+
 test_aio1072_the_child_gets_a_minimal_environment() {
   up_setup
   export SECRET_TOKEN_X=s3cr3t NODE_OPTIONS=--require=/tmp/evil.js DYLD_INSERT_LIBRARIES=/tmp/evil.dylib

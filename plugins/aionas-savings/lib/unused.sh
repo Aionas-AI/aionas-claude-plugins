@@ -88,10 +88,11 @@ aionas_unused_jedit() {
     [ ! -L "$_je_l" ] && [ -f "$_je_l" ] || return 1
     _je_f=$_je_l
   fi
-  _je_new="$_je_f.aionas-tmp.$$"
   [ -d "$(dirname "$_je_f")" ] || aionas_mkdir "$(dirname "$_je_f")" || return 1
+  # Created exclusively (mode 0600, never an existing file or a planted link).
+  _je_new=$(mktemp "$(dirname "$_je_f")/.aionas-tmp.XXXXXX" 2>/dev/null) || return 1
   _je_fp=$(aionas_unused_fp "$_je_f")
-  (umask 077 && aionas_unused_j "$_je_op" "$_je_f" "$_je_val" "$@" >"$_je_new")
+  aionas_unused_j "$_je_op" "$_je_f" "$_je_val" "$@" >"$_je_new"
   _je_rc=$?
   if [ $_je_rc -ne 0 ]; then rm -f "$_je_new"; return $_je_rc; fi
   _je_mode=$(stat -c %a "$_je_f" 2>/dev/null || stat -f %Lp "$_je_f" 2>/dev/null)

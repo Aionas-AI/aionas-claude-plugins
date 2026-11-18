@@ -114,12 +114,21 @@ test_wrong_shapes_are_left_alone() {
   t_rc 4 J set-str "$f" off skillOverrides a
 }
 
+test_aio1072_jedit_never_writes_through_a_planted_temp_link() {
+  local f victim; f=$(put p.json '{"projects":{}}'); victim=$(put victim.txt 'keep')
+  for n in 1 2 3 4 5 6 7 8 9; do ln -s "$victim" "$f.aionas-tmp.$$$n" 2>/dev/null; ln -s "$victim" "$(dirname "$f")/.aionas-tmp.$n" 2>/dev/null; done
+  ln -s "$victim" "$f.aionas-tmp.$$" 2>/dev/null
+  t_rc 0 aionas_unused_jedit "$f" add-item a projects /p d
+  t_eq keep "$(cat "$victim")"
+  t_contains "$(cat "$f")" '"a"'
+}
+
 test_invalid_json_exits_2_and_jedit_does_not_touch_the_file() {
   local f; f=$(put c.json '{"projects":{"/p":{"d":[}}}')
   t_rc 2 J add-item "$f" a projects /p d
   t_rc 2 aionas_unused_jedit "$f" add-item a projects /p d
   t_eq '{"projects":{"/p":{"d":[}}}' "$(cat "$f")"
-  ls "$HOME" | grep -q aionas-tmp && t_fail "temp file left behind"
+  ls -A "$HOME" | grep -q aionas-tmp && t_fail "temp file left behind"
   return 0
 }
 

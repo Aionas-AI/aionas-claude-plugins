@@ -42,7 +42,7 @@ stop_input() {
   [ -n "${2:-}" ] && bg=",\"background_tasks\":[{\"id\":\"t1\",\"type\":\"local_agent\",\"status\":\"$2\",\"description\":\"d\"}]"
   local pid=''
   [ -n "$PROMPT" ] && pid=",\"prompt_id\":\"$PROMPT\""
-  printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s"%s,"hook_event_name":"Stop","stop_hook_active":false%s}' "$SID" "$1" "$HOME/proj" "$pid" "$bg"
+  printf '{"session_id":"%s","transcript_path":%s,"cwd":%s%s,"hook_event_name":"Stop","stop_hook_active":false%s}' "$SID" "$(aionas_json_escape "$1")" "$(aionas_json_escape "$HOME/proj")" "$pid" "$bg"
 }
 
 # run_stop SCRIPT TRANSCRIPT [BG]: start the Stop hook in the background; OUT/ERR/RC files.
@@ -554,6 +554,16 @@ test_aio1072_windows_launcher_is_not_written_for_a_value_cmd_cannot_quote() {
   aionas_handoff_write_opener "$SID" "$cwd" >/dev/null
   t_not test -e "$(hdir)/opener-$SID.cmd"
   t_ok test -x "$(hdir)/opener-$SID.sh"
+}
+
+# AIO-1072, finding 10: the Stop input's transcript_path is JSON; it is decoded
+# before the file is read (a quote in a macOS path, backslashes on Windows).
+test_aio1072_a_transcript_path_with_a_quote_still_arms_the_timer() {
+  policy_low
+  local f; f=$(transcript 30000 "$HOME/it's \"q\" proj/$SID.jsonl")
+  IDLE=2 run_stop handoff-arm.sh "$f"
+  t_eq 2 "$(wait_rc "$RUN")" "the timer wakes the session"
+  t_contains "$(cat "$RUN/err")" "about 30K tokens"
 }
 
 t_main "$@"

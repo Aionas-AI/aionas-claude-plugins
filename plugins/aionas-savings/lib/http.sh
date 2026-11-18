@@ -11,7 +11,7 @@
 
 # _aionas_http_proto GATEWAY: the one protocol curl may use.
 _aionas_http_proto() {
-  case "$1" in http://*) echo =http ;; *) echo =https ;; esac
+  case "$1" in http://*) echo '=http' ;; *) echo '=https' ;; esac
 }
 
 # _aionas_http_result CODE RC: print the status ("000" when curl failed or

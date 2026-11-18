@@ -62,25 +62,43 @@ aionas_unused_j() {
   AU_OP="$_uj_op" AU_PATH="$_uj_path" AU_VAL="$_uj_val" awk -f "$AIONAS_LIB/unused-json.awk" "$_uj_file"
 }
 
+# aionas_unused_fp FILE: what identifies this version of FILE (content
+# checksum and mtime), "absent" when there is none.
+aionas_unused_fp() {
+  [ -e "$1" ] || { echo absent; return 0; }
+  printf '%s %s\n' "$(cksum <"$1" 2>/dev/null)" "$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null)"
+}
+# _uu_pre_swap FILE: runs just before the swap (a no-op; tests redefine it to
+# play the other writer).
+_uu_pre_swap() { :; }
+
 # aionas_unused_jedit FILE OP VAL [KEY...]: an edit op. Rewrites FILE (all or
-# nothing, same mode, through a symlink if it is one) only when something
-# changes. Exit 0 changed, 10 nothing to change, 2 invalid JSON, 4 the file
-# has another kind of value there (left alone).
+# nothing, same mode) only when something changes. Exit 0 changed, 10 nothing
+# to change, 2 invalid JSON, 4 the file has another kind of value there (left
+# alone), 1 not written. AIO-1072, finding 9: the new file replaces FILE only
+# if FILE is unchanged since it was read (checksum and mtime compared right
+# before the rename), else it is left as the other writer (another Claude
+# session) made it. A symlinked FILE is replaced at its target by a rename in
+# the target's folder, never truncated in place; a link to a link is left alone.
 aionas_unused_jedit() {
   _je_f=$1; _je_op=$2; _je_val=$3; shift 3
+  if [ -L "$_je_f" ]; then
+    _je_l=$(readlink "$_je_f" 2>/dev/null) || return 1
+    case "$_je_l" in /*) ;; *) _je_l="$(dirname "$_je_f")/$_je_l" ;; esac
+    [ ! -L "$_je_l" ] && [ -f "$_je_l" ] || return 1
+    _je_f=$_je_l
+  fi
   _je_new="$_je_f.aionas-tmp.$$"
   [ -d "$(dirname "$_je_f")" ] || aionas_mkdir "$(dirname "$_je_f")" || return 1
+  _je_fp=$(aionas_unused_fp "$_je_f")
   (umask 077 && aionas_unused_j "$_je_op" "$_je_f" "$_je_val" "$@" >"$_je_new")
   _je_rc=$?
   if [ $_je_rc -ne 0 ]; then rm -f "$_je_new"; return $_je_rc; fi
   _je_mode=$(stat -c %a "$_je_f" 2>/dev/null || stat -f %Lp "$_je_f" 2>/dev/null)
-  if [ -L "$_je_f" ]; then
-    cat "$_je_new" >"$_je_f" || { rm -f "$_je_new"; return 1; }
-    rm -f "$_je_new"
-  else
-    mv -f "$_je_new" "$_je_f" || { rm -f "$_je_new"; return 1; }
-    case "$_je_mode" in [0-7][0-7][0-7]) chmod "$_je_mode" "$_je_f" 2>/dev/null ;; esac
-  fi
+  _uu_pre_swap "$_je_f"
+  if [ "$(aionas_unused_fp "$_je_f")" != "$_je_fp" ]; then rm -f "$_je_new"; return 1; fi
+  mv -f "$_je_new" "$_je_f" || { rm -f "$_je_new"; return 1; }
+  case "$_je_mode" in [0-7][0-7][0-7]) chmod "$_je_mode" "$_je_f" 2>/dev/null ;; esac
   return 0
 }
 

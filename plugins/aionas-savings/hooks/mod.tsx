@@ -260,19 +260,39 @@ async function subagentBase($: EngineInterface): Promise<string> {
   return base
 }
 
-async function subagentModel($: EngineInterface): Promise<void> {
+// Sets the sub-agent model for this start; true when the policy put Sonnet
+// there in place of the person's own value (or none).
+async function subagentModel($: EngineInterface): Promise<boolean> {
   const base = await subagentBase($)
   const r = await bypass($, ['--subagent-model', base === '-' ? '' : base])
-  if (r.code !== 0 || r.out === '') return
+  if (r.code !== 0 || r.out === '') return false
   const want = r.out === '-' ? undefined : r.out
   if ((await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) !== want) await $.env.set('CLAUDE_CODE_SUBAGENT_MODEL', want)
+  return want !== undefined && want !== base && isSonnet(want)
 }
 
-// One count per sub-agent start (W25P-P4): fired while subagent_sonnet is on
-// for this session, else skipped. The script decides and queues the row; a
-// failure here never reaches the sub-agent.
-async function subagentCount($: EngineInterface): Promise<void> {
-  await bypass($, ['--subagent-start'])
+const isSonnet = (model: string | undefined): boolean => model !== undefined && /sonnet/i.test(model)
+
+// What a sub-agent start says about subagent_sonnet (W25P-P4, AIO-1073):
+// undefined when the method could not act on it (the agent named its model,
+// is a fork, or its parent already runs on Sonnet: no count, no record);
+// "moved" when the policy's Sonnet is what it started on (instead of the
+// parent's model); "kept" otherwise.
+export const subagentOutcome = (
+  input: { model?: string; fork: boolean; parentModel: string },
+  result: { model?: string; agentId?: string; deny?: string },
+  policySet: boolean,
+): 'moved' | 'kept' | undefined => {
+  if (input.model !== undefined || input.fork || isSonnet(input.parentModel)) return undefined
+  if (result.deny !== undefined || result.agentId === undefined) return undefined
+  return policySet && isSonnet(result.model) ? 'moved' : 'kept'
+}
+
+// One count per such start, after it started: the script counts fired (and
+// records the prompt) or skipped by the method's state; a failure here never
+// reaches the sub-agent.
+async function subagentCount($: EngineInterface, outcome: 'moved' | 'kept' | undefined): Promise<void> {
+  if (outcome !== undefined) await bypass($, ['--subagent-start', outcome])
 }
 
 // The band's facts, read again (§6): at session start, every 30 s, after a
@@ -592,9 +612,10 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
-    await subagentCount($)
-    await subagentModel($)
-    return next(e)
+    const policySet = await subagentModel($)
+    const r = await next(e)
+    await subagentCount($, subagentOutcome(e, r, policySet)).catch(() => undefined)
+    return r
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'aionas-bypass' }, async ($, e) => {

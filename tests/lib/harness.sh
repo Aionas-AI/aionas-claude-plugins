@@ -17,7 +17,7 @@ t_fresh() {
   export AIONAS_PLUGIN_ROOT="$T_PLUGIN"
   export AIONAS_CURL="$T_REPO/tests/lib/fake-curl.sh"
   FAKE_CURL_LOG=$(mktemp -d "$T_ROOT/curl.XXXXXX"); export FAKE_CURL_LOG
-  unset FAKE_CURL_STATUS FAKE_CURL_BODY FAKE_CURL_EXIT FAKE_CURL_SLEEP
+  unset FAKE_CURL_STATUS FAKE_CURL_BODY FAKE_CURL_EXIT FAKE_CURL_SLEEP FAKE_CURL_RC
   # shellcheck disable=SC1091
   . "$T_PLUGIN/lib/aionas.sh"
   # Enrolled by default (the plugin does nothing without the alias);

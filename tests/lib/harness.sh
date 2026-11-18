@@ -42,6 +42,10 @@ t_enroll() {
 t_calls() { find "$FAKE_CURL_LOG" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '; }
 t_call() { cat "$FAKE_CURL_LOG/$1/$2"; }
 
+# t_counters: every counter increment queued and not yet folded into the
+# totals (lib/counters.sh: one spool file each), as day method counter value.
+t_counters() { cat "$(aionas_savings_dir)"/counters/spool/*.ev 2>/dev/null; }
+
 # t_mode FILE: permission bits in octal (GNU stat, else BSD stat).
 t_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 

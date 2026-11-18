@@ -57,7 +57,7 @@ run_stop() {
 wait_rc() { local i=0; while [ ! -f "$1/rc" ] && [ $i -lt ${2:-40} ]; do sleep 0.5; i=$((i + 1)); done; [ -f "$1/rc" ] || t_fail "hook still running after $((i / 2)) s"; cat "$1/rc"; }
 hdir() { echo "$(aionas_savings_dir)/handoff"; }
 cancel_prompt() { printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"%s"}' "$SID" "typed text" | bash "$HOOKS/handoff-cancel.sh"; }
-queue() { cat "$(aionas_savings_dir)/counters/queue.tsv" 2>/dev/null; }
+queue() { t_counters; }
 
 test_context_tokens_sums_last_answer_only() {
   . "$HOOKS/handoff-wake.sh"

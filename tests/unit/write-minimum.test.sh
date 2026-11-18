@@ -16,7 +16,7 @@ cache() { # policy cache lines (tab separated) -> policy.cache and the s1 pin
   cp "$(aionas_savings_dir)/policy.cache" "$(aionas_savings_dir)/sessions/s1.cache"
 }
 sha() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 || sha256sum "$1" | cut -d' ' -f1; }
-queue() { cut -f2- "$(aionas_savings_dir)/counters/queue.tsv" 2>/dev/null | tr '\t\n' ' ;'; }
+queue() { t_counters | cut -f2- | tr '\t\n' ' ;'; }
 
 test_the_shipped_file_is_the_labs_byte_for_byte() {
   t_eq "$LAB_SHA" "$(sha "$CTX")"

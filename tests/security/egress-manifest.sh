@@ -6,6 +6,9 @@
 #   public <METHOD> <path>   every request to the enrolled gateway WITHOUT the alias
 #   net <path>: <tool>       any other network tool or API outside lib/http.sh
 #   mod <path>: <api>        every privileged mod API ($.http, $.process, $.fs)
+#   delegated <path>: <what> an upload a hook hands to another program (its
+#                            AIONAS_*_EGRESS line: binary, route, fields)
+#   run <path>: <command>    every program hooks/daily-scan.sh starts (exec)
 # tests/unit/egress-manifest.test.sh compares it with security/egress-manifest.txt,
 # so a change to what reaches a customer computer fails CI until that file is
 # updated in the same PR, where the code owner sees it.
@@ -29,5 +32,9 @@ code() { grep -vE '^[[:space:]]*(#|//)' "$1"; }
     code "$f" | grep -oE '(^|[^A-Za-z_])(curl|wget|socat|telnet|ssh|scp|Invoke-WebRequest|Invoke-RestMethod)([^A-Za-z_-]|$)|/dev/(tcp|udp)/|(^|[^.A-Za-z_])fetch\(|XMLHttpRequest|WebSocket' |
       sed -E "s/^[^A-Za-z/]*//; s/[^A-Za-z(/]*$//; s|^|net $f: |"
     code "$f" | grep -oE '\$\.(http|process|fs)\.[A-Za-z]+' | sed "s|^|mod $f: |"
+    code "$f" | grep -oE "AIONAS_[A-Z_]+_EGRESS='[^']*'" | sed -E "s/^[^']*'//; s/'\$//; s|^|delegated $f: |"
+    case "$f" in */hooks/daily-scan.sh)
+      code "$f" | grep -oE '(^|[^A-Za-z_])exec [^<>)]+' | sed -E "s/^[^e]*exec //; s/[[:space:]]+\$//; s|^|run $f: |" ;;
+    esac
   done
 } | sort -u

@@ -22,3 +22,8 @@ weekly figure and keep the text when it cannot. Besides the usage lines, that
 text has Claude Code's "What's contributing" section: local folder names,
 skill, sub-agent, MCP and plugin names (the "Top plugins:" line), and request counts. Prompts and model replies
 never leave. The plugin does not parse the text and never reads a login token.
+
+Two samples go to `POST /cc-quota/v1/samples` on the organization's own gateway (AIO‑1072, field by field):
+
+- **Plan report** (once a day, or at once when the plan or organization changes): `tool` (`claude_code`), `source` (`plan_usage`), `observed_at`, `plan.vendor_plan_id`, and from Claude's login file, when present: `account_uuid`, `organization_uuid` and `organization_name` (the Claude organization's id and name; control and bidi characters dropped, at most 128 characters).
+- **Usage probe** (at most every 4 hours): `tool`, `source` (`usage_cmd`), `observed_at`, the same `account_uuid`, `organization_uuid` and `organization_name`, `claude_version` (only when the install folder names it), `windows` (`weekly_all`, 10080 minutes), and `usage_raw`: the **full text** of Claude Code's own `/usage` result, at most 32 KiB. That text includes Claude Code's "What's contributing" section: local folder names, skill, sub-agent, MCP and plugin names, and request counts.

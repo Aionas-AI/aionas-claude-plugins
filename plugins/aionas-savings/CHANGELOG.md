@@ -2,7 +2,9 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
-## 0.6.0 (2026-11-13)
+## 0.6.1 (2026-11-18)
+
+- **This is the release of the changes below.** The tag `aionas-savings-v0.6.0` was created by mistake on the 0.5.0 code before this work was merged, and release tags cannot be moved or deleted, so 0.6.0 was never released with this content; it is the same as 0.5.0. Nothing changed in the code since the changes were written as 0.6.0.
 
 - **Every method that acts is now reported per prompt, so applied savings can be checked request by request** (AIO‑1004): until now nothing in the plugin called `POST /enroll/v1/savings/requests`, so the server had daily totals but no record to tie them to. At the end of each turn (the existing Stop hook, `counters-flush.sh`) the plugin sends one record per method that acted on that turn (`subagent_sonnet`, `output_trim`, `handoff`): `session_id`, `prompt_id`, `method`, `ts`, `plugin_version`, and `tokens` where the plugin measured it (the output left out of the context for `output_trim`, the context size at the handoff). Nothing else: no prompt text, file path, command, tool output or cost (the gateway prices it). Marks wait in `~/.aionas/agent/savings/requests/` until the turn's prompt id is known; a record that cannot be sent waits for the next turn (at most 5 minutes between failed tries, two days, 200 records), one the server refuses is dropped and counted. New: `lib/requests.sh`, and the endpoint in `security/egress-manifest.txt`.
 - **The band's /compact runs once per press and shows that it is compacting** (AIO‑1022): the button had no guard and no state, so each press added another `/compact` to Claude Code's queue (Tamar's transcript shows four). Now at most one `/compact` is in flight per session (terminal and desktop): presses meanwhile do nothing and the button is a dim "Compacting…" label. It returns if the command fails, if the context size is still above `compact_at` 10 seconds after it ran, or after 2 minutes without any new size.

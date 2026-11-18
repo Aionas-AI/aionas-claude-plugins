@@ -138,7 +138,7 @@ test_every_hook_does_nothing_inside_the_probe_child() {
   done
   t_ok grep -q 'plan-report.sh' "$list"
   t_ok grep -q 'usage-probe.sh' "$list"
-  t_ok test "$(wc -l <"$list" | tr -d ' ')" -ge 14
+  t_ok test "$(wc -l <"$list" | tr -d ' ')" -ge 13
   export STUB_HOOK_LIST=$list
   hook
   local d="$STUB_LOG/run.1"
@@ -313,7 +313,7 @@ test_a_result_that_is_not_valid_utf8_is_refused_and_counted() {
   done
   t_eq 8 "$(bad_text_counter)" "usage_probe_bad_text"
   t_eq 0 "$(counter)" "not a too-large result"
-  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
+  t_eq "" "$(t_counters)"
 }
 
 test_only_valid_json_escapes_are_sent() {
@@ -365,7 +365,7 @@ test_the_size_limit_is_32_kib_of_decoded_text() {
   t_eq 2 "$(t_calls)" "multi-byte text is measured in bytes"
   t_eq 3 "$(counter)"
   # never through the gateway's counter list
-  t_not test -f "$(aionas_savings_dir)/counters/queue.tsv"
+  t_eq "" "$(t_counters)"
   t_lacks "$(cat "$T_PLUGIN/lib/catalog.sh")" usage_probe "catalog.sh stays closed"
 }
 

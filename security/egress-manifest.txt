@@ -1,8 +1,6 @@
 file plugins/aionas-savings/.claude-plugin/plugin.json
 file plugins/aionas-savings/CHANGELOG.md
 file plugins/aionas-savings/README.md
-file plugins/aionas-savings/bin/aionas-recall
-file plugins/aionas-savings/bin/aionas-recall.cmd
 file plugins/aionas-savings/commands/aionas-bypass-lib.sh
 file plugins/aionas-savings/commands/aionas-bypass.sh
 file plugins/aionas-savings/commands/aionas-handoff.md
@@ -16,15 +14,9 @@ file plugins/aionas-savings/hooks/handoff-cancel.sh
 file plugins/aionas-savings/hooks/handoff-wake.sh
 file plugins/aionas-savings/hooks/hooks.json
 file plugins/aionas-savings/hooks/mod.tsx
-file plugins/aionas-savings/hooks/noisy-guard.sh
-file plugins/aionas-savings/hooks/output-store.sh
 file plugins/aionas-savings/hooks/plan-report.sh
 file plugins/aionas-savings/hooks/policy-sync.sh
-file plugins/aionas-savings/hooks/posttool-store.awk
-file plugins/aionas-savings/hooks/posttool-store.sh
-file plugins/aionas-savings/hooks/pretool-guard.awk
-file plugins/aionas-savings/hooks/pretool-guard.lib
-file plugins/aionas-savings/hooks/pretool-guard.sh
+file plugins/aionas-savings/hooks/request-prompt.sh
 file plugins/aionas-savings/hooks/script-refresh.sh
 file plugins/aionas-savings/hooks/stop-handoff.sh
 file plugins/aionas-savings/hooks/unused-services-notice.sh
@@ -50,17 +42,15 @@ file plugins/aionas-savings/lib/unused-json.awk
 file plugins/aionas-savings/lib/unused-usage.awk
 file plugins/aionas-savings/lib/unused.sh
 file plugins/aionas-savings/lib/usage-probe.sh
-file plugins/aionas-savings/rules/guard-store.tsv
 file plugins/aionas-savings/tsconfig.json
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/daily-scan.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/effort-window.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handoff-arm.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handoff-cancel.sh\""
-hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/noisy-guard.sh\""
-hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/output-store.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/plan-report.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/policy-sync.sh\""
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/request-prompt.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/script-refresh.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services-notice.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services.sh\""

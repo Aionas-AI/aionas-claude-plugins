@@ -2,17 +2,16 @@
 # (docs/openapi/paths/management/aionassavings.yaml, wave 24).
 
 # Every method id the server knows. cache_guard is required: always on,
-# never overridden or released. output_trim (AIO-883, 0.2.0) replaced
-# noisy_guard and output_store: the quiet form, the cap and the store are
-# one method, off unless the organization turns it on.
-AIONAS_METHODS="handoff effort_default subagent_sonnet unused_services output_trim write_minimum cache_alert seat_fit cache_guard tool_search dispatcher"
+# never overridden or released. Tool output trimming is no longer a method
+# of the plugin (0.6.1, AIO-1073).
+AIONAS_METHODS="handoff effort_default subagent_sonnet unused_services write_minimum cache_alert seat_fit cache_guard tool_search dispatcher"
 AIONAS_REQUIRED_METHODS="cache_guard"
 
 # subagent_sonnet's model: the alias the one install writes too.
 AIONAS_SUBAGENT_MODEL=sonnet
 # Methods that are off when the policy has no row for them (every other
-# method is on: W24-1).
-AIONAS_DEFAULT_OFF_METHODS="output_trim"
+# method is on: W24-1). None since 0.6.1.
+AIONAS_DEFAULT_OFF_METHODS=""
 
 # The plugin's counters (AIO-855): numbers only, summed per UTC day.
 # compact_pressed (AIO-1023, handoff only): one per compaction started from the

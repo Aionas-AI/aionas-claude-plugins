@@ -8,7 +8,6 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 
 - the handoff document,
 - effort capped at high, with the `/aionas-xhigh` window that allows xhigh or max for sessions opened in the next 10 minutes,
-- tool output trimming (`output_trim`): the noisy-command guard and the long-output store as one method, off unless the organization turns it on (0.2.0, AIO‑883),
 - Sonnet for sub-agents that pick no model (`subagent_sonnet`), set inside the running session only; turned off (the band's chip, `/aionas-bypass`, or the organization), sub-agents are back on the person's own setting (a bypass from the next sub-agent, the organization from the next session), and `settings.json` is never written (0.3.1, AIO‑884),
 - "write the minimum": one paragraph added at session start, exactly as the lab tested it (0.3.0, AIO‑889).
 
@@ -55,8 +54,7 @@ tests/                                   make test
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |
 | SessionStart | `write-minimum.sh` | 5 s, not async | AIO‑889 |
 | UserPromptSubmit | `handoff-cancel.sh` | 5 s | AIO‑858 |
-| PreToolUse (Bash) | `noisy-guard.sh` | 10 s | AIO‑860, `output_trim` (AIO‑883) |
-| PostToolUse | `output-store.sh` | 30 s | AIO‑860, `output_trim` (AIO‑883) |
+| UserPromptSubmit | `request-prompt.sh` | 5 s | AIO‑1073 (the prompt id per-request records are tied to) |
 | Stop | `handoff-arm.sh` | asyncRewake | AIO‑858 |
 | Stop | `counters-flush.sh` | async | AIO‑855 |
 

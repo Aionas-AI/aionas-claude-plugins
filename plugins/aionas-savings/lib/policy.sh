@@ -8,7 +8,7 @@
 #   sync.status           "<epoch> <http status>" of the last sync attempt
 #
 # A session reads its pin, so a policy change applies from the next session
-# only. With nothing cached every method is on (output_trim off, AIO-883) and
+# only. With nothing cached every method is on (but AIONAS_DEFAULT_OFF_METHODS) and
 # self-override and self-release are allowed (W24-1, W24-2). Required methods are always on and
 # can never be overridden or released.
 

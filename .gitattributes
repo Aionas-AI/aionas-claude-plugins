@@ -9,6 +9,5 @@
 *.tsx       text eol=lf
 *.md        text eol=lf
 Makefile    text eol=lf
-plugins/aionas-savings/bin/aionas-recall text eol=lf
 # cmd.exe wants CRLF
 *.cmd       text eol=crlf

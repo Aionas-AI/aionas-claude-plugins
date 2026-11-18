@@ -71,7 +71,6 @@ export type Chip = {
 export const CHIP_LABELS: Record<string, string> = {
   effort_default: 'medium',
   subagent_sonnet: 'sonnet subagents',
-  output_trim: 'trim',
   handoff: 'handoff',
   unused_services: 'unused off',
   write_minimum: 'write-min',
@@ -84,7 +83,6 @@ export const TIPS: Record<string, string> = {
   effort_default: 'New sessions start at medium; high is the most you can pick.',
   window: 'Sessions you open before the timer ends may go up to xhigh or max.',
   subagent_sonnet: 'Sub-agents that do not pick a model run on Sonnet.',
-  output_trim: 'Noisy commands are shortened; long output shows only its start, its end and the errors.',
   handoff: 'A long chat left idle gets a note to go on in a new session.',
   handoff_done: 'Writes no handoff doc for this session. A new message here takes it back.',
   handoff_new: 'Opens a new conversation that starts from the doc. This one is kept, so you can come back to it.',

@@ -30,6 +30,15 @@
 //   names the doc, this folder) while this one stays in the list; in the
 //   terminal /clear (a new session id; /resume returns to the old one) and
 //   the starting prompt put in the prompt box. The person sends it.
+// - The limit guard (AIO-1083, wave 33; lib/limit-guard.sh reads the local
+//   5-hour and Fable weekly figures, never the server): at the warn line
+//   (80 %) the band warns, sub-agents run on Sonnet (CLAUDE_CODE_SUBAGENT_MODEL
+//   set before each start, as subagent_sonnet does, and a start that names a
+//   heavier model is rewritten to Sonnet), the effort grant is held at high,
+//   and the model gets one line of context per window; at 90 % one toast per
+//   window SUGGESTS /model sonnet. The main model is never changed (Tal,
+//   19.11.2026). No reading, a stale one, the method off or an older gateway:
+//   nothing changes.
 //
 // Privacy (W24-4): nothing here sends anything; the scripts send only method
 // ids, durations, closed-set params and a reason the person typed. The band
@@ -37,8 +46,20 @@
 // the context size from session.measure; it never calls $.http.fetch or
 // $.session.messages, nor reads ~/.claude/projects or the alias credential.
 import type { EngineInterface, Register } from 'claude-code'
-import { NO_GIT_BASH, drawBand, drawNotice, isCounting, parseBand, routeOf } from './band.tsx'
-import type { Action, ActionResult, Facts } from './band.tsx'
+import {
+  NO_GIT_BASH,
+  drawBand,
+  drawNotice,
+  isCounting,
+  isGuarding,
+  isSuggesting,
+  limitContext,
+  limitToast,
+  parseBand,
+  parseLimit,
+  routeOf,
+} from './band.tsx'
+import type { Action, ActionResult, Facts, LimitFact } from './band.tsx'
 
 type Grant = 'high' | 'xhigh' | 'max' | 'free'
 type Level = 'xhigh' | 'max'
@@ -166,6 +187,11 @@ const st = {
   tick: undefined as { cancel: () => void } | undefined,
   countdown: undefined as { cancel: () => void } | undefined,
   isDrawn: false,
+  // AIO-1083: the limit guard's last reading, and the window (source:reset)
+  // this session already showed the 90 % toast for / told the model about.
+  limit: undefined as LimitFact | undefined,
+  limitToasted: '',
+  limitTold: '',
 }
 
 function script(root: string, path: string): string {
@@ -272,6 +298,37 @@ async function subagentModel($: EngineInterface): Promise<boolean> {
 }
 
 const isSonnet = (model: string | undefined): boolean => model !== undefined && /sonnet/i.test(model)
+// Sonnet or lighter: what the limit guard leaves as it is.
+export const isLight = (model: string | undefined): boolean => model !== undefined && /sonnet|haiku/i.test(model)
+
+// The limit guard's reading (AIO-1083): one run of lib/limit-guard.sh, which
+// also counts how each watched window ended. Nothing read: undefined.
+async function readLimit($: EngineInterface): Promise<LimitFact | undefined> {
+  const r = await run($, [script($.plugin.root, 'lib/limit-guard.sh'), 'state', st.sid])
+  st.limit = r.code === 0 ? parseLimit(r.out) : undefined
+  if (isSuggesting(st.limit)) suggestOnce($, st.limit as LimitFact)
+  return st.limit
+}
+
+const limitKey = (l: LimitFact): string => `${l.source ?? '-'}:${l.reset}`
+
+// At 90 % and up: one toast per window in this session, a suggestion only.
+function suggestOnce($: EngineInterface, l: LimitFact): void {
+  if (st.limitToasted === limitKey(l)) return
+  st.limitToasted = limitKey(l)
+  $.ui.toast(limitToast(l, st.facts?.now ?? l.reset, st.facts?.tzOffset))
+}
+
+// While the guard acts: Sonnet for this sub-agent start, unless the start is
+// already on Sonnet or lighter. Taken off again at the next start once the
+// guard stops (subagentModel puts the method's value back). True when it set
+// Sonnet in place of a heavier value.
+async function guardSubagentModel($: EngineInterface): Promise<boolean> {
+  const now = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
+  if (isLight(now)) return false
+  await $.env.set('CLAUDE_CODE_SUBAGENT_MODEL', 'sonnet')
+  return true
+}
 
 // What a sub-agent start says about subagent_sonnet (W25P-P4, AIO-1073):
 // undefined when the method could not act on it (the agent named its model,
@@ -303,8 +360,14 @@ function refresh($: EngineInterface): Promise<void> {
   if (st.refreshing !== undefined) return st.refreshing
   const p = (async () => {
     const r = await bypass($, ['--band'])
-    if (r.code !== 0 || r.out === '') return
+    // AIO-1083: the limit guard's reading, after the facts (its toast tells
+    // the time in this computer's clock).
+    if (r.code !== 0 || r.out === '') {
+      await readLimit($)
+      return
+    }
     st.facts = parseBand(r.out)
+    await readLimit($)
     const isOpen = isCounting(st.facts)
     if (isOpen && st.countdown === undefined) st.countdown = $.clock.every(15_000, () => void drawnRefresh($))
     if (!isOpen && st.countdown !== undefined) {
@@ -572,7 +635,9 @@ export const register: Register = on => {
         $.ui.invalidate('ui.render')
       }
     }
-    if (st.chosen === undefined) return yield* next(e)
+    // AIO-1083: near the end of the 5-hour window (or Fable's week) the grant
+    // is held: the request goes at the settings cap (high).
+    if (st.chosen === undefined || isGuarding(st.limit)) return yield* next(e)
     const body = withEffort(st.baseExtra, st.chosen)
     if (body === undefined) return yield* next(e)
     await $.env.set('CLAUDE_CODE_EXTRA_BODY', body)
@@ -613,9 +678,24 @@ export const register: Register = on => {
 
   on('agent.spawn', async ($, e, next) => {
     const policySet = await subagentModel($)
-    const r = await next(e)
+    // AIO-1083: past the warn line every sub-agent runs on Sonnet, also one
+    // that asked for a heavier model (Fable, Opus, inherit). Its Sonnet is
+    // not subagent_sonnet's, so it never counts as that method's.
+    const isGuarded = isGuarding(await readLimit($).catch(() => undefined))
+    if (isGuarded) await guardSubagentModel($)
+    const ask = isGuarded && e.model !== undefined && !isLight(e.model) ? { ...e, model: 'sonnet' } : e
+    const r = await next(ask)
     await subagentCount($, subagentOutcome(e, r, policySet)).catch(() => undefined)
     return r
+  }).catch(($, e, next) => next(e))
+
+  // AIO-1083: one line of context per window while the guard acts, so the
+  // model knows the window is near its end (numbers and a time only).
+  on('prompt.submit', async ($, e, next) => {
+    const l = st.limit
+    if (!isGuarding(l) || st.limitTold === limitKey(l)) return next(e)
+    st.limitTold = limitKey(l)
+    return next({ ...e, context: [...(e.context ?? []), limitContext(l, st.facts?.now ?? l.reset, st.facts?.tzOffset)] })
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'aionas-bypass' }, async ($, e) => {
@@ -699,6 +779,7 @@ export const register: Register = on => {
         laterAt: st.laterAt,
         isCompacting: st.compacting !== undefined,
         action: st.action,
+        limit: st.limit,
       },
       {
         chip: a => void press($, a),

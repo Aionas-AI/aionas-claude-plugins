@@ -57,6 +57,57 @@ export type Facts = {
   handoff: HandoffFact
 }
 
+// The limit guard's reading (AIO-1083), from `lib/limit-guard.sh state`:
+// `limit <level> <source> <pct> <reset>`, names and numbers only. off and
+// unmeasured draw nothing (F10: no reading is never a warning).
+export type LimitLevel = 'off' | 'unmeasured' | 'ok' | 'warn' | 'suggest' | 'full'
+export type LimitFact = { level: LimitLevel; source: 'five_hour' | 'fable_week' | undefined; pct: number; reset: number }
+const LIMIT_LEVELS: readonly string[] = ['off', 'unmeasured', 'ok', 'warn', 'suggest', 'full']
+
+export const parseLimit = (out: string): LimitFact | undefined => {
+  const p = out.trim().split('\n')[0]?.split('\t') ?? []
+  if (p.length !== 5 || p[0] !== 'limit' || !LIMIT_LEVELS.includes(p[1] ?? '')) return undefined
+  const source = p[2] === 'five_hour' || p[2] === 'fable_week' ? p[2] : undefined
+  const level = p[1] as LimitLevel
+  const isMeasured = level === 'ok' || level === 'warn' || level === 'suggest' || level === 'full'
+  if (isMeasured && (source === undefined || !/^[0-9]+$/.test(p[3] ?? '') || !/^[0-9]+$/.test(p[4] ?? ''))) return undefined
+  return isMeasured ? { level, source, pct: Number(p[3]), reset: Number(p[4]) } : { level, source: undefined, pct: 0, reset: 0 }
+}
+
+// At or past the warn line: the band warns, sub-agents run on Sonnet, the
+// effort grant is held at high and the model is told once. 90 % and up also
+// SUGGESTS /model sonnet; the main model is never changed by the plugin.
+export const isGuarding = (l: LimitFact | undefined): l is LimitFact & { source: 'five_hour' | 'fable_week' } =>
+  l !== undefined && l.source !== undefined && (l.level === 'warn' || l.level === 'suggest' || l.level === 'full')
+export const isSuggesting = (l: LimitFact | undefined): boolean => l !== undefined && (l.level === 'suggest' || l.level === 'full')
+
+// "15:00" today, "Oct 23 15:00" another day, in this computer's time (UTC
+// when the offset is not known).
+export const resetLabel = (reset: number, now: number, tzOffset: number | undefined): string => {
+  const off = tzOffset ?? 0
+  const day = (t: number) => Math.floor((t + off) / 86400)
+  const d = new Date((reset + off) * 1000)
+  const when = day(reset) === day(now) ? hhmm(reset, off) : `${MONTHS[d.getUTCMonth()] ?? ''} ${d.getUTCDate()} ${hhmm(reset, off)}`
+  return tzOffset === undefined ? `${when} UTC` : when
+}
+const limitName = (l: LimitFact): string => (l.source === 'fable_week' ? "Fable's weekly limit" : '5-hour window')
+
+// The band's row: "5-hour window 82%, resets 15:00", then what the guard does.
+export const limitLine = (l: LimitFact, now: number, tzOffset: number | undefined): string | undefined => {
+  if (!isGuarding(l)) return undefined
+  const head = `▲ ${l.source === 'fable_week' ? 'Fable weekly' : '5-hour window'} ${l.pct}%, resets ${resetLabel(l.reset, now, tzOffset)}`
+  if (l.level === 'warn') return `${head} · sub-agents run on Sonnet`
+  return `${head} · sub-agents run on Sonnet · /model sonnet keeps you working (your choice)`
+}
+
+// The one toast at 90 %: a suggestion, never a switch.
+export const limitToast = (l: LimitFact, now: number, tzOffset: number | undefined): string =>
+  `Your ${limitName(l)} is at ${l.pct}% (resets ${resetLabel(l.reset, now, tzOffset)}). To keep working, you can switch with /model sonnet. Aionas does not change your main model.`
+
+// The one line of context the model gets once per window.
+export const limitContext = (l: LimitFact, now: number, tzOffset: number | undefined): string =>
+  `Aionas: the person's Claude ${limitName(l)} is at ${l.pct}% and resets at ${resetLabel(l.reset, now, tzOffset)}. Until then sub-agents run on Sonnet and effort stays at high; keep the work focused and avoid long exploratory runs.`
+
 export type Action = { kind: 'bypass' | 'end' | 'xhigh'; method: string }
 export type Chip = {
   method: string
@@ -391,6 +442,8 @@ export type View = {
   isCompacting: boolean
   // AIO-1023: what the last action taken from the band did (undefined: none).
   action: ActionResult | undefined
+  // AIO-1083: the limit guard's reading (undefined: none read).
+  limit?: LimitFact | undefined
 }
 
 // What /compact or the handoff did, from the band's own context readings
@@ -664,6 +717,17 @@ export function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt', 'term
         ...(hv === 'due' ? [{ id: 'handoff_done', text: TIPS.handoff_done as string }] : []),
         ...(hv === 'cold' ? [{ id: 'handoff_new', text: TIPS.handoff_new as string }] : []),
       ]),
+    )
+  }
+
+  const limitText = v.limit === undefined ? undefined : limitLine(v.limit, f.now, f.tzOffset)
+  if (limitText !== undefined) {
+    rows.push(
+      <Box key="aionas-limit" flexDirection="row" flexWrap="wrap" columnGap={1}>
+        <Text color="warning">
+          {limitText}
+        </Text>
+      </Box>,
     )
   }
 

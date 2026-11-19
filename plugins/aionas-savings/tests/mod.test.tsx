@@ -49,6 +49,9 @@ type World = {
   // Windows only: the bash.exe paths that start (a `-c true` exits 0 there), and the paths recorded for support.
   files: string[]
   recorded: string[]
+  // AIO-1083: what lib/limit-guard.sh state prints, and every env name set.
+  limit: string
+  envNames: string[]
 }
 
 const ME = ['me', 'Noa Levi', 'Acme', 'member', 'Omer Katz', 'mbp-noa'].join('\t')
@@ -97,6 +100,8 @@ function world(on: On, grant: string = 'high'): World {
     toasts: [],
     files: [],
     recorded: [],
+    limit: '',
+    envNames: [],
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: w.sessionId }))
@@ -120,6 +125,7 @@ function world(on: On, grant: string = 'high'): World {
     let exitCode = 0
     if (e.argv[1] === '-c' && e.argv[2] === 'true') exitCode = w.files.includes(e.argv[0] as string) ? 0 : 127
     else if (a.includes('git-bash-path')) w.recorded.push(last[1] as string)
+    else if (a.includes('lib/limit-guard.sh state')) stdout = w.limit
     else if (a.includes('effort-window.sh grant')) stdout = grant
     else if (a.includes('--subagent-start')) stdout = ''
     else if (a.includes('--subagent-model')) {
@@ -158,6 +164,7 @@ function world(on: On, grant: string = 'high'): World {
   on('env.set', ($, e) => {
     // The effort tests count only the effort variables (subagent_sonnet's are
     // read back from env).
+    w.envNames.push(e.name)
     if (!e.name.includes('SUBAGENT_MODEL')) w.envSets.push(e.value)
     env.set(e.name, e.value)
     return { value: undefined }
@@ -1219,6 +1226,156 @@ describe('subagent_sonnet', () => {
     await $.agent.spawn({ prompt: 'hi' })
     expect(w.env.get('AIONAS_SUBAGENT_MODEL_BASE')).toBe('opus')
     expect(models).toEqual(['opus'])
+  })
+})
+
+// AIO-1083: the guard on the 5-hour window and Fable's weekly cap. The
+// script's own rules (thresholds, staleness, counts, Cursor, capability) are
+// in tests/unit/limit-guard.test.sh; here: what the mod does with its line.
+describe('limit guard (AIO-1083)', () => {
+  const R5 = T0 + 7200 // 12:00Z = 15:00 on the fixture's UTC+3 clock
+  const lim = (level: string, pct: number, source = 'five_hour', reset = R5) => `limit\t${level}\t${source}\t${pct}\t${reset}`
+  const LIMIT_ROW = 'aionas-limit'
+  const rowText = async (ui: any): Promise<string | undefined> => {
+    const n = await ui.find({ key: LIMIT_ROW })
+    return n === undefined ? undefined : textOf(n)
+  }
+  const spawned = (on: On, w: World, models: (string | undefined)[], asked: (string | undefined)[]) =>
+    on('agent.spawn', ($, e) => {
+      asked.push(e.model)
+      models.push(w.env.get('CLAUDE_CODE_SUBAGENT_MODEL'))
+      return { model: e.model ?? w.env.get('CLAUDE_CODE_SUBAGENT_MODEL') ?? 'claude-fable-1', agentId: 'agent-1' }
+    })
+  const MAIN_MODEL_VARS = ['ANTHROPIC_MODEL', 'CLAUDE_CODE_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL']
+
+  test('79 %: no row, no toast, sub-agents keep their model', async ($, on) => {
+    const w = world(on, 'high')
+    w.limit = lim('ok', 79)
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
+    const models: (string | undefined)[] = []
+    const asked: (string | undefined)[] = []
+    spawned(on, w, models, asked)
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await rowText(ui)).toBeUndefined()
+    }
+    await $.agent.spawn({ prompt: 'one' })
+    await $.agent.spawn({ prompt: 'two', model: 'opus' })
+    expect(models).toEqual([undefined, undefined])
+    expect(asked).toEqual([undefined, 'opus'])
+    expect(w.toasts).toEqual([])
+  })
+
+  test('80 %: the band shows the percent and the reset; every sub-agent runs on Sonnet, also one that asked for Fable', async ($, on) => {
+    const w = world(on, 'high')
+    w.limit = lim('warn', 82)
+    // subagent_sonnet bypassed: the guard still moves sub-agents.
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
+    const models: (string | undefined)[] = []
+    const asked: (string | undefined)[] = []
+    spawned(on, w, models, asked)
+    await start($)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await rowText(ui)).toBe('▲ 5-hour window 82%, resets 15:00 · sub-agents run on Sonnet')
+    }
+    await $.agent.spawn({ prompt: 'one' })
+    await $.agent.spawn({ prompt: 'two', model: 'fable' })
+    await $.agent.spawn({ prompt: 'three', model: 'haiku' })
+    expect(models).toEqual(['sonnet', 'sonnet', 'sonnet'])
+    expect(asked).toEqual([undefined, 'sonnet', 'haiku'])
+    // Not subagent_sonnet's Sonnet: that method counts the first start as skipped (kept), not fired.
+    const starts = w.argv.map(a => a.join(' ')).filter(a => a.includes('--subagent-start')).map(a => a.split(' ').slice(-1)[0])
+    expect(starts).toEqual(['kept'])
+    expect(w.toasts).toEqual([])
+    // The window resets: the next start is back on the person's own choice.
+    w.limit = lim('ok', 2, 'five_hour', T0 + 18000)
+    await $.agent.spawn({ prompt: 'four', model: 'fable' })
+    expect(models.at(-1)).toBeUndefined()
+    expect(asked.at(-1)).toBe('fable')
+  })
+
+  test('Fable weekly: the row names the day of the reset', async ($, on) => {
+    const w = world(on, 'high')
+    w.limit = lim('warn', 86, 'fable_week', T0 + 3 * 86400)
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await rowText(ui)).toBe('▲ Fable weekly 86%, resets Oct 23 13:00 · sub-agents run on Sonnet')
+  })
+
+  test('90 %: one toast suggests /model sonnet; the main model is never changed', async ($, on) => {
+    const w = world(on, 'high')
+    w.limit = lim('suggest', 91)
+    const models: (string | undefined)[] = []
+    spawned(on, w, models, [])
+    await start($)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await rowText(ui)).toBe('▲ 5-hour window 91%, resets 15:00 · sub-agents run on Sonnet · /model sonnet keeps you working (your choice)')
+    await $.agent.spawn({ prompt: 'one' })
+    await $.agent.spawn({ prompt: 'two' })
+    const suggestions = w.toasts.filter(t => t.includes('/model sonnet'))
+    expect(suggestions).toEqual([
+      'Your 5-hour window is at 91% (resets 15:00). To keep working, you can switch with /model sonnet. Aionas does not change your main model.',
+    ])
+    // 100 % in the same window: still that one toast.
+    w.limit = lim('full', 100)
+    await $.agent.spawn({ prompt: 'three' })
+    expect(w.toasts.filter(t => t.includes('/model sonnet')).length).toBe(1)
+    for (const v of MAIN_MODEL_VARS) expect(w.envNames).not.toContain(v)
+    expect(w.envNames.filter(n => n.includes('MODEL') && !n.includes('SUBAGENT_MODEL'))).toEqual([])
+  })
+
+  test('the effort grant is held at high while the guard acts, and comes back after the window', async ($, on) => {
+    const w = world(on, 'xhigh')
+    const seen: (string | undefined)[] = []
+    bottomStep(on, w, seen)
+    on('command.run', { command: 'effort' }, () => ({ text: 'engine' }))
+    w.limit = lim('warn', 85)
+    await start($)
+    await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await $.command.run({ command: 'effort', args: 'max' } as never)
+    await step($, 'high')
+    w.limit = lim('ok', 1, 'five_hour', T0 + 18000)
+    await $.agent.spawn({ prompt: 'reads the guard again' }).catch(() => undefined)
+    await step($, 'high')
+    expect(seen).toEqual([undefined, '{"output_config":{"effort":"max"}}'])
+  })
+
+  test('not measured, off, or no line at all: nothing changes', async ($, on) => {
+    const w = world(on, 'high')
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
+    const models: (string | undefined)[] = []
+    const asked: (string | undefined)[] = []
+    spawned(on, w, models, asked)
+    for (const out of [lim('unmeasured', 0, '-', 0), lim('off', 0, '-', 0), '', 'limit\twarn\t-\t85\t0', 'garbage']) {
+      w.limit = out
+      await start($)
+      const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+      expect(await rowText(ui)).toBeUndefined()
+      await $.agent.spawn({ prompt: 'x', model: 'opus' })
+      expect(asked.at(-1)).toBe('opus')
+      expect(models.at(-1)).toBeUndefined()
+      expect(w.toasts).toEqual([])
+    }
+  })
+
+  test('the model is told once per window, in numbers and a time only', async ($, on) => {
+    const w = world(on, 'high')
+    const contexts: (readonly string[] | undefined)[] = []
+    on('prompt.submit', ($, e) => {
+      contexts.push(e.context)
+      return { text: e.text }
+    })
+    w.limit = lim('warn', 83)
+    await start($)
+    await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await $.prompt.submit({ text: 'first' })
+    await $.prompt.submit({ text: 'second' })
+    expect(contexts[0]).toEqual([
+      "Aionas: the person's Claude 5-hour window is at 83% and resets at 15:00. Until then sub-agents run on Sonnet and effort stays at high; keep the work focused and avoid long exploratory runs.",
+    ])
+    expect(contexts[1] ?? []).toEqual([])
   })
 })
 

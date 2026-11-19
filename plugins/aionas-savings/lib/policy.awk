@@ -5,6 +5,8 @@
 #   M <method> <on|off> <required> <self_override> <self_release> <released>
 #   P <method> <param path> <type> <raw value>
 #   O <method> <status> <from epoch|0> <until epoch|0> <id>
+#   C <capability>          (AIO-1077: what the gateway accepts, from
+#                            "capabilities"; an older gateway sends none)
 # (tab separated; flags are 1/0). Methods outside the catalog and malformed
 # rows are skipped. Exit 2 (write nothing) when there is no methods array.
 BEGIN {
@@ -23,6 +25,8 @@ BEGIN {
       key = seg[4]; for (k = 5; k <= np; k++) key = key "." seg[k]
       pc[n]++; pk[n, pc[n]] = key; pt[n, pc[n]] = t; pv[n, pc[n]] = v
     }
+  } else if (seg[1] == "capabilities" && np == 2 && t == "s" && v ~ /^[a-z][a-z0-9_]*$/ && length(v) <= 64) {
+    if (!(v in capseen)) { capseen[v] = 1; cap[++ncap] = v }
   } else if (seg[1] == "overrides" && np == 3) {
     n = seg[2]; oi[n] = 1; ov[n, seg[3]] = (t == "s") ? v : ""
   }
@@ -50,4 +54,5 @@ END {
     if (fr == "" || un == "") continue
     print "O\t" id "\t" st "\t" fr "\t" un "\t" oid
   }
+  for (k = 1; k <= ncap; k++) print "C\t" cap[k]
 }

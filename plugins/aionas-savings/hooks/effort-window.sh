@@ -106,6 +106,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
+aionas_claude_code_only # Claude Code only: exits 0 at once under Cursor (AIO-1077)
 cat >/dev/null 2>&1 || true
 effort_cleanup >/dev/null 2>&1
 exit 0

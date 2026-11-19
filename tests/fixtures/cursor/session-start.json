@@ -1,0 +1,28 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-0000000c0001",
+  "generation_id": "",
+  "model": "grok-4.7-high",
+  "model_id": "grok-4.7",
+  "model_params": [
+    {
+      "id": "context",
+      "value": "256k"
+    },
+    {
+      "id": "reasoning_effort",
+      "value": "high"
+    },
+    {
+      "id": "fast",
+      "value": "false"
+    }
+  ],
+  "is_background_agent": false,
+  "composer_mode": "agent",
+  "session_id": "00000000-0000-4000-8000-0000000c0001",
+  "hook_event_name": "sessionStart",
+  "cursor_version": "3.23.23",
+  "workspace_roots": [],
+  "user_email": "member@example.test",
+  "transcript_path": null
+}

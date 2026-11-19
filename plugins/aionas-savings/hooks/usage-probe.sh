@@ -16,6 +16,7 @@
 # locally). Prints nothing, always exits 0. Details: lib/usage-probe.sh.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
+aionas_claude_code_only # Claude Code only: exits 0 at once under Cursor (AIO-1077)
 . "$AIONAS_LIB/usage-probe.sh" 2>/dev/null || exit 0
 # A shell job that is killed prints a message on stderr; Claude Code ignores
 # hook stderr, so drop it here and keep the hook silent.

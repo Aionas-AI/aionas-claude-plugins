@@ -21,6 +21,7 @@ AIONAS_SCAN_EGRESS='aionas-scan --incremental -> POST /enroll/v1/savings/retro w
 # Prints nothing, exits 0.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
+aionas_claude_code_only # Claude Code only: exits 0 at once under Cursor (AIO-1077)
 cat >/dev/null 2>&1 || true
 
 find_scanner() {

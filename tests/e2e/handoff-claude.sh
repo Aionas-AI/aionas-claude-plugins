@@ -58,13 +58,13 @@ sids=$(grep -o '"session_id":"[^"]*"' "$d/out.jsonl" | sort -u | wc -l | tr -d '
 [ "$sids" = 1 ] || fail "expected one session id, saw $sids"
 ls "$d/sav/handoff" | grep -q '^opener-.*\.sh$' || fail "no opener file"
 grep -q delivered "$d/sav/handoff/"*.state || fail "state not delivered"
-grep -q 'handoff	fired	1' "$d/sav/counters/queue.tsv" || fail "the delivery was not counted"
+grep -q 'handoff	fired	1' "$d"/sav/counters/spool/*.ev || fail "the delivery was not counted"
 
 d=$(run_case prompt 1 8 | tail -n 1)
 echo "--- prompt case: mock calls"; cat "$d/mock.log"
 [ "$(awk '$2 == 1' "$d/mock.log" | wc -l | tr -d ' ')" = 0 ] || fail "a prompt before the deadline must cancel the timer"
 [ "$(grep -c '"type":"result"' "$d/out.jsonl")" = 2 ] || fail "both prompts should have been answered"
-grep -q 'handoff	skipped	1' "$d/sav/counters/queue.tsv" || fail "the cancel was not counted"
+grep -q 'handoff	skipped	1' "$d"/sav/counters/spool/*.ev || fail "the cancel was not counted"
 
 d=$(FIRST_PROMPT=/aionas-savings:aionas-handoff CONTEXT=1000 run_case command none 3 | tail -n 1)
 echo "--- command case: mock calls"; cat "$d/mock.log"

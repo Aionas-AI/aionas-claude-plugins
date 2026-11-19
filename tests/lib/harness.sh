@@ -17,7 +17,7 @@ t_fresh() {
   export AIONAS_PLUGIN_ROOT="$T_PLUGIN"
   export AIONAS_CURL="$T_REPO/tests/lib/fake-curl.sh"
   FAKE_CURL_LOG=$(mktemp -d "$T_ROOT/curl.XXXXXX"); export FAKE_CURL_LOG
-  unset FAKE_CURL_STATUS FAKE_CURL_BODY FAKE_CURL_EXIT FAKE_CURL_SLEEP
+  unset FAKE_CURL_STATUS FAKE_CURL_BODY FAKE_CURL_EXIT FAKE_CURL_SLEEP FAKE_CURL_RC
   # shellcheck disable=SC1091
   . "$T_PLUGIN/lib/aionas.sh"
   # Enrolled by default (the plugin does nothing without the alias);
@@ -41,6 +41,10 @@ t_enroll() {
 # t_calls: number of fake-curl calls so far. t_call N FIELD: one recorded field.
 t_calls() { find "$FAKE_CURL_LOG" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '; }
 t_call() { cat "$FAKE_CURL_LOG/$1/$2"; }
+
+# t_counters: every counter increment queued and not yet folded into the
+# totals (lib/counters.sh: one spool file each), as day method counter value.
+t_counters() { cat "$(aionas_savings_dir)"/counters/spool/*.ev 2>/dev/null; }
 
 # t_mode FILE: permission bits in octal (GNU stat, else BSD stat).
 t_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }

@@ -20,8 +20,9 @@ _in=$(cat 2>/dev/null)
 _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)
 _sid=$(printf '%s\n' "$_flat" | aionas_json_get session_id)
 _aionas_sid_ok "$_sid" || exit 0
-_tr=$(printf '%s\n' "$_flat" | aionas_json_get transcript_path)
-_cwd=$(printf '%s\n' "$_flat" | aionas_json_get cwd)
+# The two paths with their JSON escapes decoded (AIO-1072, finding 10).
+_tr=$(printf '%s\n' "$_flat" | aionas_json_get_str transcript_path)
+_cwd=$(printf '%s\n' "$_flat" | aionas_json_get_str cwd)
 _pid=$(printf '%s\n' "$_flat" | aionas_json_get prompt_id)
 _aionas_sid_ok "$_pid" || _pid=''
 
@@ -92,7 +93,7 @@ while :; do
   [ -z "$_tr" ] || [ -f "$_tr" ] || exit 0
   _now=$(date +%s)
   if [ "$_now" -ge "$_deadline" ] && ! aionas_handoff_subagents_busy "$_tr" "$_sid" "$_busy"; then
-    aionas_handoff_deliver "$_sid" "$_cwd" "$_token" "$_tok" $(((_idle_s + 59) / 60)) "$(aionas_handoff_cache_ttl "$_tr")"
+    aionas_handoff_deliver "$_sid" "$_cwd" "$_token" "$_tok" $(((_idle_s + 59) / 60)) "$(aionas_handoff_cache_ttl "$_tr")" "$_pid"
     exit $?
   fi
   _s=$_poll

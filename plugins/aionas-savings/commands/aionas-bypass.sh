@@ -35,11 +35,14 @@
 #                                on now ("-" for none), from the value it
 #                                started with (BASE, "" for none); the mod sets
 #                                it before each sub-agent starts
-#   aionas-bypass.sh --subagent-start
-#                                count one sub-agent start for subagent_sonnet:
-#                                fired while the method is active for this
-#                                session, else skipped (the mod runs it once
-#                                per sub-agent start; prints nothing, exit 0)
+#   aionas-bypass.sh --subagent-start moved|kept
+#                                count one sub-agent start that could take
+#                                subagent_sonnet: "moved" (the policy put it on
+#                                Sonnet) is fired and one record for the
+#                                session's current prompt while the method is
+#                                active; "kept" is skipped while it is not (the
+#                                mod runs it after such a start; prints
+#                                nothing, exit 0)
 #
 # Prints one line for the person. Exit 0 on success, 1 when nothing was done,
 # 2 for a usage error.
@@ -48,7 +51,7 @@ set -u
 . "$(dirname "$0")/aionas-bypass-lib.sh" || exit 1
 
 SID=${AIONAS_SESSION_ID:-}
-CLIENT_METHODS="handoff effort_default subagent_sonnet unused_services output_trim write_minimum"
+CLIENT_METHODS="handoff effort_default subagent_sonnet unused_services write_minimum"
 
 usage() {
   echo "Usage: /aionas-bypass <method> [duration] [reason]. Methods: $CLIENT_METHODS. Duration: 30m, 1h, 2d (default 1h)."
@@ -96,7 +99,7 @@ if [ "${1:-}" = --subagent-model ]; then
 fi
 
 if [ "${1:-}" = --subagent-start ]; then
-  aionas_subagent_count "$SID"
+  aionas_subagent_count "$SID" "${2:-}"
   exit 0
 fi
 

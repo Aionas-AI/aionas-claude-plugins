@@ -52,4 +52,14 @@ test_time_epoch_and_day() {
   t_eq 1970-01-01 "$(aionas_day_utc 0)"
 }
 
+# AIO-1072, finding 10: string values are decoded before they are used as paths.
+test_aio1072_get_str_decodes_a_windows_path_and_a_unix_path_with_quotes() {
+  local flat
+  flat=$(printf '{"w":"C:\\\\Users\\\\me\\\\.claude\\\\projects\\\\s1.jsonl","u":"/Users/me/it\\"s \\"q\\"/s1.jsonl","n":1}' | aionas_json_flatten)
+  t_eq 'C:\Users\me\.claude\projects\s1.jsonl' "$(printf '%s\n' "$flat" | aionas_json_get_str w)"
+  t_eq '/Users/me/it"s "q"/s1.jsonl' "$(printf '%s\n' "$flat" | aionas_json_get_str u)"
+  t_rc 1 aionas_json_get_str absent <<<"$flat"
+  t_rc 1 aionas_json_get_str n <<<"$flat"
+}
+
 t_main "$@"

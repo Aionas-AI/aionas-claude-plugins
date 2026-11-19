@@ -8,11 +8,10 @@ This plugin applies your organization's Aionas savings policy on this computer. 
 
 - the handoff document,
 - effort capped at high, with the `/aionas-xhigh` window that allows xhigh or max for sessions opened in the next 10 minutes,
-- tool output trimming (`output_trim`): the noisy-command guard and the long-output store as one method, off unless the organization turns it on (0.2.0, AIO‑883),
 - Sonnet for sub-agents that pick no model (`subagent_sonnet`), set inside the running session only; turned off (the band's chip, `/aionas-bypass`, or the organization), sub-agents are back on the person's own setting (a bypass from the next sub-agent, the organization from the next session), and `settings.json` is never written (0.3.1, AIO‑884),
 - "write the minimum": one paragraph added at session start, exactly as the lab tested it (0.3.0, AIO‑889).
 
-It also reports which Claude plan this computer is signed in to (plan and account id only), so a fix to plan detection reaches installed computers through the plugin's auto-update (0.3.0, AIO‑888).
+It also reports which Claude plan this computer is signed in to (the plan id, and the Claude account id, organization id and organization name; see Privacy below for every field), so a fix to plan detection reaches installed computers through the plugin's auto-update (0.3.0, AIO‑888).
 
 The one install (`aionas-install.sh` / `.ps1`) registers this marketplace with auto-update, enables the plugin, and writes the settings a plugin cannot carry.
 
@@ -27,7 +26,12 @@ Without the one install the plugin does nothing: no method acts and the band sta
 
 The plugin takes effect from the next session. Releases are git tags (`aionas-savings-vX.Y.Z`); with auto-update on, Claude Code follows the marketplace.
 
-**Privacy.** Apart from one text sent at most every 4 hours described next, only numbers and names leave the computer. The plugin runs Claude Code's own `/usage` command (a local command, no model call) at most once every 4 hours, on a session start on an enrolled computer signed in with a Claude subscription, when the status-line tap has no figure from the last 4 hours (this includes terminal users without the tap), and then sends the full text of its result to the organization's own gateway, by the owner's ruling; the gateway reads the weekly figure out of it, and the plugin does not parse it. That text includes Claude Code's own "What's contributing" section: local folder names, skill, sub-agent, MCP and plugin names, and request counts. It is at most 32 KiB (a larger result is not sent), and it is sent only to the gateway the computer is enrolled with, never anywhere else. Prompts, model replies, tool output and command arguments never leave. The child `claude -p "/usage"` is Claude Code's own call to Anthropic, made with the member's own login: Aionas never reads the login token, and `security/egress-manifest.txt` cannot list that call because the plugin does not make it. The probe starts only when the Claude login file has an account id (a member on an API key or routed through the gateway has none, and nothing is started). The hourly counters send a method, a counter name and a count. The policy sync only downloads.
+**Privacy.** Apart from one text sent at most every 4 hours described next, only numbers and names leave the computer. The plugin runs Claude Code's own `/usage` command (a local command, no model call) at most once every 4 hours, on a session start on an enrolled computer signed in with a Claude subscription, when the status-line tap has no figure from the last 4 hours (this includes terminal users without the tap), and then sends the full text of its result to the organization's own gateway, by the owner's ruling; the gateway reads the weekly figure out of it, and the plugin does not parse it. That text includes Claude Code's own "What's contributing" section: local folder names, skill, sub-agent, MCP and plugin names, and request counts. It is at most 32 KiB (a larger result is not sent), and it is sent only to the gateway the computer is enrolled with, never anywhere else. Prompts, model replies, tool output and command arguments never leave. The child `claude -p "/usage"` is Claude Code's own call to Anthropic, made with the member's own login: Aionas never reads the login token, and `security/egress-manifest.txt` cannot list that call because the plugin does not make it. The probe starts only when the Claude login file has an account id (a member on an API key or routed through the gateway has none, and nothing is started). The hourly counters send a method, a counter name and a count (including, from 0.6.1, how many times the band's /compact button was pressed that day: a number, not a size). From 0.6.1 the plugin also tells the gateway, at the end of each turn, which savings method acted on that turn (`POST /enroll/v1/savings/requests`): the session id, the turn's prompt id, the method name, a time, the plugin version and, for output trim and handoff, a token count. No prompt text, file path, command or tool output, and no cost: the gateway prices the record. The policy sync only downloads.
+
+Two samples go to `POST /cc-quota/v1/samples` on the organization's own gateway (AIO‑1072, field by field):
+
+- **Plan report** (once a day, or at once when the plan or organization changes): `tool` (`claude_code`), `source` (`plan_usage`), `observed_at`, `plan.vendor_plan_id`, and from Claude's login file, when present: `account_uuid`, `organization_uuid` and `organization_name` (the Claude organization's id and name; control and bidi characters dropped, at most 128 characters).
+- **Usage probe** (at most every 4 hours): `tool`, `source` (`usage_cmd`), `observed_at`, the same `account_uuid`, `organization_uuid` and `organization_name`, `claude_version` (only when the install folder names it), `windows` (`weekly_all`, 10080 minutes), and `usage_raw`: the **full text** of Claude Code's own `/usage` result, at most 32 KiB. That text includes Claude Code's "What's contributing" section: local folder names, skill, sub-agent, MCP and plugin names, and request counts.
 
 ### Layout
 
@@ -55,8 +59,7 @@ tests/                                   make test
 | SessionStart | `unused-services-notice.sh` | 5 s, not async | AIO‑861 |
 | SessionStart | `write-minimum.sh` | 5 s, not async | AIO‑889 |
 | UserPromptSubmit | `handoff-cancel.sh` | 5 s | AIO‑858 |
-| PreToolUse (Bash) | `noisy-guard.sh` | 10 s | AIO‑860, `output_trim` (AIO‑883) |
-| PostToolUse | `output-store.sh` | 30 s | AIO‑860, `output_trim` (AIO‑883) |
+| UserPromptSubmit | `request-prompt.sh` | 5 s | AIO‑1073 (the prompt id per-request records are tied to) |
 | Stop | `handoff-arm.sh` | asyncRewake | AIO‑858 |
 | Stop | `counters-flush.sh` | async | AIO‑855 |
 

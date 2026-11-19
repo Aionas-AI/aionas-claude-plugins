@@ -38,7 +38,7 @@
 // $.session.messages, nor reads ~/.claude/projects or the alias credential.
 import type { EngineInterface, Register } from 'claude-code'
 import { NO_GIT_BASH, drawBand, drawNotice, isCounting, parseBand, routeOf } from './band.tsx'
-import type { Action, Facts } from './band.tsx'
+import type { Action, ActionResult, Facts } from './band.tsx'
 
 type Grant = 'high' | 'xhigh' | 'max' | 'free'
 type Level = 'xhigh' | 'max'
@@ -153,6 +153,16 @@ const st = {
   contextTokens: 0,
   contextWindow: 0,
   laterAt: 0,
+  // AIO-1022: the /compact the band started and is waiting on (one at a time
+  // per session): the context size when it was pressed, and the timer that
+  // gives the button back if no new size ever shows.
+  compacting: undefined as { before: number; timer: { cancel: () => void } | undefined } | undefined,
+  // AIO-1023: what the last action from the band did, drawn as one line; and
+  // the size a handoff started from while the new conversation's first
+  // reading is still to come (terminal).
+  action: undefined as ActionResult | undefined,
+  handoffFrom: undefined as number | undefined,
+  handoffAsked: undefined as number | undefined,
   tick: undefined as { cancel: () => void } | undefined,
   countdown: undefined as { cancel: () => void } | undefined,
   isDrawn: false,
@@ -250,19 +260,39 @@ async function subagentBase($: EngineInterface): Promise<string> {
   return base
 }
 
-async function subagentModel($: EngineInterface): Promise<void> {
+// Sets the sub-agent model for this start; true when the policy put Sonnet
+// there in place of the person's own value (or none).
+async function subagentModel($: EngineInterface): Promise<boolean> {
   const base = await subagentBase($)
   const r = await bypass($, ['--subagent-model', base === '-' ? '' : base])
-  if (r.code !== 0 || r.out === '') return
+  if (r.code !== 0 || r.out === '') return false
   const want = r.out === '-' ? undefined : r.out
   if ((await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')) !== want) await $.env.set('CLAUDE_CODE_SUBAGENT_MODEL', want)
+  return want !== undefined && want !== base && isSonnet(want)
 }
 
-// One count per sub-agent start (W25P-P4): fired while subagent_sonnet is on
-// for this session, else skipped. The script decides and queues the row; a
-// failure here never reaches the sub-agent.
-async function subagentCount($: EngineInterface): Promise<void> {
-  await bypass($, ['--subagent-start'])
+const isSonnet = (model: string | undefined): boolean => model !== undefined && /sonnet/i.test(model)
+
+// What a sub-agent start says about subagent_sonnet (W25P-P4, AIO-1073):
+// undefined when the method could not act on it (the agent named its model,
+// is a fork, or its parent already runs on Sonnet: no count, no record);
+// "moved" when the policy's Sonnet is what it started on (instead of the
+// parent's model); "kept" otherwise.
+export const subagentOutcome = (
+  input: { model?: string; fork: boolean; parentModel: string },
+  result: { model?: string; agentId?: string; deny?: string },
+  policySet: boolean,
+): 'moved' | 'kept' | undefined => {
+  if (input.model !== undefined || input.fork || isSonnet(input.parentModel)) return undefined
+  if (result.deny !== undefined || result.agentId === undefined) return undefined
+  return policySet && isSonnet(result.model) ? 'moved' : 'kept'
+}
+
+// One count per such start, after it started: the script counts fired (and
+// records the prompt) or skipped by the method's state; a failure here never
+// reaches the sub-agent.
+async function subagentCount($: EngineInterface, outcome: 'moved' | 'kept' | undefined): Promise<void> {
+  if (outcome !== undefined) await bypass($, ['--subagent-start', outcome])
 }
 
 // The band's facts, read again (§6): at session start, every 30 s, after a
@@ -355,6 +385,13 @@ async function adoptNewSession($: EngineInterface, old: string): Promise<void> {
       st.sid = id
       st.contextTokens = 0
       st.laterAt = 0
+      // The old session's compaction and action line belong to it.
+      endCompact($)
+      st.action = undefined
+      // A handoff pressed in this session: the new conversation's first
+      // reading draws its line.
+      st.handoffFrom = st.handoffAsked
+      st.handoffAsked = undefined
       await refresh($)
       return
     }
@@ -387,6 +424,9 @@ async function newChat($: EngineInterface, surface: string | undefined): Promise
     const url = `claude://code/new?q=${encodeURIComponent(r.out)}&folder=${encodeURIComponent(cwd)}`
     const o = await handoff($, ['open-app', url])
     if (o.code === 0) {
+      // The new session is one of its own: this band cannot read its size.
+      st.action = { kind: 'handoff', before: st.contextTokens, after: undefined }
+      $.ui.invalidate('ui.render')
       $.ui.toast('A new session opened with the handoff doc. This one stays in your list, so you can come back to it.')
       return
     }
@@ -395,13 +435,18 @@ async function newChat($: EngineInterface, surface: string | undefined): Promise
     return
   }
   let isCleared = true
+  const before = st.contextTokens
   try {
     await $.command.run({ command: 'clear' })
   } catch {
     isCleared = false
   }
-  // The new conversation's own facts (no handoff row).
-  if (isCleared) void adoptNewSession($, old).catch(() => undefined)
+  // The new conversation's own facts (no handoff row); its first context
+  // size draws the handoff's line.
+  if (isCleared) {
+    st.handoffAsked = before > 0 ? before : undefined
+    void adoptNewSession($, old).catch(() => undefined)
+  }
   const filled = isCleared ? await $.prompt.fill({ text: r.out }).catch(() => undefined) : undefined
   if (filled?.isFilled === true) {
     $.ui.toast(`New conversation: press Enter to start it. The old one is kept: /resume ${old} goes back to it.`)
@@ -411,8 +456,59 @@ async function newChat($: EngineInterface, surface: string | undefined): Promise
   $.ui.toast('The starting prompt is copied: paste it into a new conversation.')
 }
 
+// Gives the /compact button back after this long without a new context size
+// (the host never answered or the compaction did nothing).
+const COMPACT_GIVE_BACK_MS = 120_000
+// After command.run answered: how long a new context size is still awaited.
+const COMPACT_SETTLE_MS = 10_000
+
+function endCompact($: EngineInterface): void {
+  st.compacting?.timer?.cancel()
+  st.compacting = undefined
+  $.ui.invalidate('ui.render')
+}
+
+// AIO-1022: the band's /compact. At most one in flight per session (presses
+// meanwhile are ignored: each used to add another /compact to the host's
+// queue, and the transcript showed it three times). The button is a dim
+// "Compacting…" label until the context size moves down, command.run fails,
+// or the give-back timer runs out. A /compact the person types never comes
+// through here: only a press counts (AIO-1023, one count event per press).
 async function compactNow($: EngineInterface): Promise<void> {
-  await $.command.run({ command: 'compact' })
+  if (st.compacting !== undefined) return
+  const state = { before: st.contextTokens, timer: undefined as { cancel: () => void } | undefined }
+  st.compacting = state
+  state.timer = $.clock.after(COMPACT_GIVE_BACK_MS, () => {
+    if (st.compacting === state) endCompact($)
+  })
+  $.ui.invalidate('ui.render')
+  try {
+    await $.command.run({ command: 'compact' })
+  } catch {
+    if (st.compacting === state) endCompact($)
+    $.ui.toast('/compact did not run. Press it again, or type /compact.')
+    return
+  }
+  // The press ran: one count (a number: no text, no path, no size).
+  void bypass($, ['--count', 'handoff', 'compact_pressed']).catch(() => undefined)
+  if (st.compacting !== state) return
+  // The new size usually shows by now; if it does not, wait a little for it.
+  if (!settleCompact($)) {
+    state.timer?.cancel()
+    state.timer = $.clock.after(COMPACT_SETTLE_MS, () => {
+      if (st.compacting === state) endCompact($)
+    })
+  }
+}
+
+// The compaction shows in the band's own context size: lower than at the
+// press. Draws the one line (once per action) and gives the button back.
+function settleCompact($: EngineInterface): boolean {
+  const c = st.compacting
+  if (c === undefined || c.before <= 0 || st.contextTokens <= 0 || st.contextTokens >= c.before) return false
+  st.action = { kind: 'compact', before: c.before, after: st.contextTokens }
+  endCompact($)
+  return true
 }
 
 function redraw($: EngineInterface, change: () => void): void {
@@ -516,9 +612,10 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
-    await subagentCount($)
-    await subagentModel($)
-    return next(e)
+    const policySet = await subagentModel($)
+    const r = await next(e)
+    await subagentCount($, subagentOutcome(e, r, policySet)).catch(() => undefined)
+    return r
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'aionas-bypass' }, async ($, e) => {
@@ -566,6 +663,13 @@ export const register: Register = on => {
       const isChanged = shown(t) !== shown(st.contextTokens) || e.context.window !== st.contextWindow
       st.contextTokens = t
       st.contextWindow = e.context.window
+      if (st.handoffFrom !== undefined && t > 0) {
+        // The new conversation's first reading after a handoff (terminal).
+        st.action = { kind: 'handoff', before: st.handoffFrom, after: t }
+        st.handoffFrom = undefined
+        $.ui.invalidate('ui.render')
+      }
+      settleCompact($)
       if (isChanged) $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -593,6 +697,8 @@ export const register: Register = on => {
         contextTokens: st.contextTokens,
         contextWindow: st.contextWindow,
         laterAt: st.laterAt,
+        isCompacting: st.compacting !== undefined,
+        action: st.action,
       },
       {
         chip: a => void press($, a),

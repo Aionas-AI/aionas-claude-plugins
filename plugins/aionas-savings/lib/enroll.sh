@@ -27,8 +27,12 @@ aionas_enroll_has_alias() {
 }
 
 # aionas_enroll_auth_header_file FILE: write "Authorization: Bearer <alias>"
-# to FILE (mode 0600). Exit 1, writing nothing, when there is no valid alias.
+# to FILE (mode 0600). Exit 1, writing nothing, when there is no valid alias,
+# or when FILE is a symlink or an existing file that is not empty (aionas_http
+# passes a fresh mktemp file; AIO-1072, finding 5).
 aionas_enroll_auth_header_file() {
   aionas_enroll_has_alias || return 1
+  [ ! -L "$1" ] || return 1
+  if [ -e "$1" ]; then [ -f "$1" ] && [ ! -s "$1" ] || return 1; fi
   (umask 077 && { printf 'Authorization: Bearer '; tr -d '\r\n' <"$(aionas_agent_dir)/credential"; printf '\n'; } >"$1")
 }

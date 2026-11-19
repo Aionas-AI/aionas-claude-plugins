@@ -33,7 +33,7 @@ test_policy_sync_unreachable_keeps_cache_makes_one_call_and_exits_0() {
   t_rc 0 hook policy-sync.sh '{"session_id":"sess-3"}'
   t_eq $((n + 1)) "$(t_calls)" "only the policy fetch was tried"
   t_eq "$before" "$(cat "$(aionas_savings_dir)/policy.cache")"
-  t_eq off "$(aionas_policy_state output_trim sess-3)"
+  t_eq off "$(aionas_policy_state tool_search sess-3)"
 }
 
 test_policy_sync_sends_counters_and_pending_overrides_when_reachable() {
@@ -58,10 +58,10 @@ test_policy_sync_not_enrolled_makes_no_call() {
 test_counters_flush_is_hourly() {
   t_enroll; export FAKE_CURL_STATUS=200 AIONAS_NOW=$T0
   mkdir -p "$(aionas_savings_dir)/counters"
-  printf '2026-10-20\toutput_trim\tfired\t2\n' >"$(aionas_savings_dir)/counters/queue.tsv"
+  printf '2026-10-20\ttool_search\tfired\t2\n' >"$(aionas_savings_dir)/counters/queue.tsv"
   t_eq "" "$(hook counters-flush.sh '{}')"
   t_eq 1 "$(t_calls)"
-  printf '2026-10-20\toutput_trim\tfired\t1\n' >>"$(aionas_savings_dir)/counters/queue.tsv"
+  printf '2026-10-20\ttool_search\tfired\t1\n' >>"$(aionas_savings_dir)/counters/queue.tsv"
   export AIONAS_NOW=$((T0 + 600))
   hook counters-flush.sh '{}'
   t_eq 1 "$(t_calls)" "sent twice within the hour"
@@ -75,7 +75,7 @@ grant() { AIONAS_NOW=${AIONAS_NOW:-$T0} bash "$H/effort-window.sh" grant "$1"; }
 test_grant_is_high_by_default_and_counts_fired_once() {
   t_eq high "$(grant s1)"
   t_eq high "$(grant s1)"
-  t_eq 1 "$(grep -c "$(printf 'effort_default\tfired')" "$(aionas_savings_dir)/counters/queue.tsv")"
+  t_eq 1 "$(t_counters | grep -c "$(printf 'effort_default\tfired')")"
 }
 
 test_window_grants_new_sessions_for_life_and_not_open_ones() {
@@ -105,7 +105,7 @@ test_effort_default_off_or_bypassed_grants_free() {
   printf 'V\t1\n' >"$(aionas_savings_dir)/policy.cache"
   aionas_override_local_add effort_default 3600 self
   t_eq free "$(grant f2)"
-  t_contains "$(cat "$(aionas_savings_dir)/counters/queue.tsv")" "$(printf 'effort_default\tskipped')"
+  t_contains "$(t_counters)" "$(printf 'effort_default\tskipped')"
 }
 
 test_approved_request_opens_the_window_at_the_next_session() {

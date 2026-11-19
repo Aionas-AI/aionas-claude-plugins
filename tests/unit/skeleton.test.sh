@@ -32,7 +32,7 @@ entries() {
 test_hooks_json_registers_every_lane_entry() {
   local got
   got=$(entries | awk -F '\037' '{ c = $3; sub(/.*\/hooks\//, "", c); sub(/\\".*/, "", c); print $1 "/" $2 "/" c }' | sort | tr '\n' ' ')
-  t_eq "PostToolUse//output-store.sh PreToolUse/Bash/noisy-guard.sh SessionStart//daily-scan.sh SessionStart//effort-window.sh SessionStart//plan-report.sh SessionStart//policy-sync.sh SessionStart//script-refresh.sh SessionStart//unused-services-notice.sh SessionStart//unused-services.sh SessionStart//usage-probe.sh SessionStart//write-minimum.sh Stop//counters-flush.sh Stop//handoff-arm.sh UserPromptSubmit//branch-report.sh UserPromptSubmit//handoff-cancel.sh " "$got"
+  t_eq "SessionStart//daily-scan.sh SessionStart//effort-window.sh SessionStart//plan-report.sh SessionStart//policy-sync.sh SessionStart//script-refresh.sh SessionStart//unused-services-notice.sh SessionStart//unused-services.sh SessionStart//usage-probe.sh SessionStart//write-minimum.sh Stop//counters-flush.sh Stop//handoff-arm.sh UserPromptSubmit//branch-report.sh UserPromptSubmit//handoff-cancel.sh UserPromptSubmit//request-prompt.sh " "$got"
 }
 
 test_hook_commands_point_at_executable_scripts() {
@@ -109,15 +109,14 @@ test_no_registered_script_is_a_silent_stub() {
 test_gitattributes_forces_lf_on_scripts() {
   local f eol
   t_ok test -f "$T_REPO/.gitattributes"
-  for f in plugins/aionas-savings/hooks/noisy-guard.sh plugins/aionas-savings/hooks/pretool-guard.awk \
-    plugins/aionas-savings/hooks/pretool-guard.lib plugins/aionas-savings/lib/aionas.sh \
-    plugins/aionas-savings/lib/json.awk plugins/aionas-savings/commands/aionas-bypass.sh \
-    plugins/aionas-savings/bin/aionas-recall plugins/aionas-savings/rules/guard-store.tsv; do
+  for f in plugins/aionas-savings/hooks/counters-flush.sh plugins/aionas-savings/lib/policy.awk \
+    plugins/aionas-savings/lib/aionas.sh plugins/aionas-savings/lib/json.awk \
+    plugins/aionas-savings/commands/aionas-bypass.sh plugins/aionas-savings/x.tsv; do
     eol=$(git -C "$T_REPO" check-attr eol -- "$f" | sed 's/.*: //')
     t_eq lf "$eol" "$f is not forced to LF"
   done
-  eol=$(git -C "$T_REPO" check-attr eol -- plugins/aionas-savings/bin/aionas-recall.cmd | sed 's/.*: //')
-  t_eq crlf "$eol" "aionas-recall.cmd"
+  eol=$(git -C "$T_REPO" check-attr eol -- plugins/aionas-savings/x.cmd | sed 's/.*: //')
+  t_eq crlf "$eol" "a .cmd file"
 }
 
 t_main "$@"

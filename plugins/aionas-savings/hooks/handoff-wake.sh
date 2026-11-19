@@ -195,14 +195,25 @@ aionas_handoff_write_opener() {
   } | aionas_write_atomic "$_wo_sh" || return 1
   chmod 700 "$_wo_sh" 2>/dev/null
   if [ "$(aionas_os)" = windows ]; then
-    _wo_cwd=$(cygpath -w "${2:-.}" 2>/dev/null || echo "${2:-.}")
-    _wo_wd=$(cygpath -w "$_wo_dir" 2>/dev/null || echo "$_wo_dir")
-    _wo_wmd=$(cygpath -w "$_wo_md" 2>/dev/null || echo "$_wo_md")
-    {
-      printf '@echo off\r\n'
-      printf 'cd /d "%s" || exit /b 1\r\n' "$_wo_cwd"
-      printf 'claude --add-dir "%s" "%s"\r\n' "$_wo_wd" "$(aionas_handoff_prompt "$_wo_wmd")"
-    } | aionas_write_atomic "$_wo_dir/opener-$1.cmd"
+    # Paths are data in the batch file (AIO-1072, finding 4): cmd.exe expands
+    # %NAME% even inside double quotes, so each % is written as %% (read back
+    # as one %). A double quote or a line break cannot be quoted safely: then
+    # no .cmd is written (the .sh opener above still is).
+    _wo_bq() {
+      case "$1" in *'"'* | *"$(printf '\r')"* | *'
+'*) return 1 ;; esac
+      printf '%s' "$1" | sed 's/%/%%/g'
+    }
+    rm -f "$_wo_dir/opener-$1.cmd"
+    if _wo_cwd=$(_wo_bq "$(cygpath -w "${2:-.}" 2>/dev/null || echo "${2:-.}")") &&
+      _wo_wd=$(_wo_bq "$(cygpath -w "$_wo_dir" 2>/dev/null || echo "$_wo_dir")") &&
+      _wo_wp=$(_wo_bq "$(aionas_handoff_prompt "$(cygpath -w "$_wo_md" 2>/dev/null || echo "$_wo_md")")"); then
+      {
+        printf '@echo off\r\n'
+        printf 'cd /d "%s" || exit /b 1\r\n' "$_wo_cwd"
+        printf 'claude --add-dir "%s" "%s"\r\n' "$_wo_wd" "$_wo_wp"
+      } | aionas_write_atomic "$_wo_dir/opener-$1.cmd"
+    fi
   fi
   echo "$_wo_sh"
 }
@@ -230,7 +241,7 @@ Do not run /compact and do not change any setting. When both are done, say the h
 MSG
 }
 
-# aionas_handoff_deliver SID CWD TOKEN TOKENS MINUTES [TTL]: the wake. Exit 2 with
+# aionas_handoff_deliver SID CWD TOKEN TOKENS MINUTES [TTL] [PROMPT_ID]: the wake. Exit 2 with
 # the instruction on stderr (Claude Code wakes the same session with it) when
 # this is the one live timer and nothing was delivered yet; exit 0 and no
 # output otherwise.
@@ -249,6 +260,9 @@ aionas_handoff_deliver() {
   # the doc is written moves this on).
   aionas_handoff_status "$1" delivered "$4" $(($(aionas_now) + ${6:-3600}))
   aionas_counter_inc handoff fired >/dev/null 2>&1
+  # The record of the prompt that armed the timer (AIO-1004), with the
+  # context size the session would have carried.
+  [ -z "${7:-}" ] || aionas_request_mark "$1" handoff "$7" "$4" >/dev/null 2>&1
   printf '%s\n' "$_dv_msg" >&2
   return 2
 }

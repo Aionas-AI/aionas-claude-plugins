@@ -2,7 +2,7 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
-## 0.6.1 (2026-11-18)
+## 0.6.1 (2026-11-19)
 
 - **Second review round (AIO‑1072):** the settings rewrite's temporary file is created exclusively with `mktemp` (a planted file or link at a predictable name can no longer be written through), and the usage probe follows a `claude` symlink chain to its end (at most 40 hops) and refuses it if any folder on the way is inside the workspace.
 

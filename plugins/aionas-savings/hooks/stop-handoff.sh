@@ -22,8 +22,74 @@
 # holds Claude Code's usage numbers, so the wait always ran its full 15 s
 # there (Cursor hooks log, 2026-11-19). Under Cursor this hook exits 0 at once,
 # before any wait (AIO-1077).
+#
+# Cursor branch (AIO-1079, wave 33): no timer, no wait, no sleep. At the end of
+# the turn that crosses the policy threshold, the hook answers on stdout with
+# {"followup_message": "<the handoff instruction>"}, the one output Cursor's
+# stop hook honors (it sends that text as the next message of the same
+# conversation; Cursor's hooks reference, "stop": output followup_message,
+# input status / loop_count / input_tokens / cache_read_tokens). Once per
+# conversation (the .done marker), only for status completed and loop_count 0
+# (the follow-up's own stop has loop_count 1). Size: numbers of the stop payload
+# only, no transcript is opened.
 . "$(dirname "$0")/handoff-wake.sh"
-aionas_claude_code_only
+
+# aionas_cursor_stop PAYLOAD: the Cursor branch. Prints the follow-up JSON or nothing.
+aionas_cursor_stop() {
+  local flat sid status loop tok th cwd msg
+  flat=$(printf '%s' "$1" | aionas_json_flatten 2>/dev/null)
+  sid=$(printf '%s\n' "$flat" | aionas_json_get session_id)
+  _aionas_sid_ok "$sid" || sid=$(printf '%s\n' "$flat" | aionas_json_get conversation_id)
+  _aionas_sid_ok "$sid" || return 0
+  # Policy first: off or released -> nothing; bypassed here -> count once.
+  [ "$(aionas_policy_state handoff "$sid")" = on ] || return 0
+  if aionas_policy_bypassed handoff "$sid"; then
+    aionas_mkdir "$(aionas_handoff_dir)" && ( set -C; : >"$(aionas_handoff_dir)/$sid.bypass" ) 2>/dev/null &&
+      aionas_counter_inc handoff bypass >/dev/null 2>&1
+    return 0
+  fi
+  # Only a finished first-level stop (not aborted or errored, not the follow-up's own stop).
+  status=$(printf '%s\n' "$flat" | aionas_json_get status)
+  loop=$(printf '%s\n' "$flat" | aionas_json_get loop_count)
+  [ "$status" = completed ] || return 0
+  [ "$loop" = 0 ] || return 0
+  # One handoff per conversation.
+  [ -f "$(aionas_handoff_dir)/$sid.done" ] && return 0
+  tok=$(aionas_cursor_context_tokens "$flat") || return 0
+  th=$(aionas_policy_param handoff threshold_tokens "$sid" 2>/dev/null)
+  aionas_is_uint "$th" && [ "$th" -ge 1 ] || th=$AIONAS_HANDOFF_DEFAULT_TOKENS
+  [ "$tok" -ge "$th" ] || return 0
+  cwd=$(printf '%s\n' "$flat" | aionas_json_get_str workspace_roots.0)
+  [ -n "$cwd" ] || cwd=$PWD
+  aionas_mkdir "$(aionas_handoff_dir)" || return 0
+  # Whoever creates the marker wins: exactly one offer.
+  ( set -C; : >"$(aionas_handoff_dir)/$sid.done" ) 2>/dev/null || return 0
+  if ! msg=$(aionas_handoff_instruction "$sid" "$cwd" "$tok" 0); then
+    rm -f "$(aionas_handoff_dir)/$sid.done"
+    return 0
+  fi
+  aionas_counter_inc handoff fired >/dev/null 2>&1
+  printf '{"followup_message":%s}\n' "$(aionas_json_escape "$msg")"
+}
+
+# aionas_cursor_context_tokens FLAT: the conversation size from numbers only:
+# context_tokens when the payload has it (preCompact's name), else
+# input_tokens + cache_read_tokens. Exit 1 with no number.
+aionas_cursor_context_tokens() {
+  local c i r
+  c=$(printf '%s\n' "$1" | aionas_json_get context_tokens)
+  if aionas_is_uint "$c" && [ "$c" -gt 0 ]; then echo "$c"; return 0; fi
+  i=$(printf '%s\n' "$1" | aionas_json_get input_tokens)
+  r=$(printf '%s\n' "$1" | aionas_json_get cache_read_tokens)
+  aionas_is_uint "$i" || return 1
+  aionas_is_uint "$r" || r=0
+  echo $((i + r))
+}
+
+if [ "$(aionas_client)" = cursor ]; then
+  aionas_cursor_stop "${AIONAS_HOOK_INPUT:-}"
+  exit 0
+fi
 
 _in=$(cat 2>/dev/null)
 _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)

@@ -50,6 +50,9 @@ aionas_counter_inc() {
   aionas_is_counter "$2" || return 2
   # The band's /compact count (AIO-1023) belongs to the handoff method.
   { [ "$2" != compact_pressed ] || [ "$1" = handoff ]; } || return 2
+  # The 5-hour window outcomes (AIO-1083) belong to limit_guard; the gateway
+  # pins them to that method and refuses them under any other.
+  case $2 in window_reset | window_reached) [ "$1" = limit_guard ] || return 2 ;; esac
   _ci_n=${3:-1}
   aionas_is_uint "$_ci_n" || return 2
   [ "$_ci_n" -ge 1 ] && [ "$_ci_n" -le 1000000 ] || return 2

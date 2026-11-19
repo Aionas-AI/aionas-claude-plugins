@@ -47,7 +47,7 @@ test_body_is_strictly_names_and_numbers() {
   local body; body=$(t_call 1 body)
   t_lacks "$body" secret
   local rest
-  rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"[a-z_]+","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g')
+  rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"[a-z_]+","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g; s/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"limit_guard","counter":"(window_reset|window_reached)","value":[0-9]+\}//g')
   t_eq '{"plugin_version":"0.6.1","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.6.1"/"0.6.1",/')"
 }
 
@@ -132,6 +132,14 @@ test_compact_pressed_is_handoff_only() {
   t_rc 0 aionas_counter_inc handoff compact_pressed
   t_rc 2 aionas_counter_inc subagent_sonnet compact_pressed
   t_rc 2 aionas_counter_inc subagent_sonnet compact_pressed 2
+}
+
+# AIO-1083: window_reset / window_reached belong to limit_guard only.
+test_window_counters_are_limit_guard_only() {
+  t_rc 0 aionas_counter_inc limit_guard window_reset
+  t_rc 0 aionas_counter_inc limit_guard window_reached
+  t_rc 2 aionas_counter_inc subagent_sonnet window_reset
+  t_rc 2 aionas_counter_inc handoff window_reached
 }
 
 test_compact_pressed_travels_alone_and_sums_per_day() {

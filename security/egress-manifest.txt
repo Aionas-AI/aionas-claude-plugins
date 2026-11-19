@@ -33,6 +33,7 @@ file plugins/aionas-savings/lib/enroll.sh
 file plugins/aionas-savings/lib/http.sh
 file plugins/aionas-savings/lib/json.awk
 file plugins/aionas-savings/lib/json.sh
+file plugins/aionas-savings/lib/limit-guard.sh
 file plugins/aionas-savings/lib/platform.sh
 file plugins/aionas-savings/lib/policy.awk
 file plugins/aionas-savings/lib/policy.sh

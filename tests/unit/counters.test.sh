@@ -30,7 +30,7 @@ test_flush_sends_summed_numbers_only() {
   local args; args=$(t_call 1 args | tr '\n' ' ')
   t_contains "$args" "--connect-timeout 3 "
   t_contains "$args" "--max-time 5 "
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-19","method_id":"subagent_sonnet","counter":"fired","value":1},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"bypass","value":1},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":3}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-19","method_id":"subagent_sonnet","counter":"fired","value":1},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"bypass","value":1},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":3}]}' "$(t_call 1 body)"
   # The day's running total stays (it is what the next send repeats); the older day is pruned once confirmed.
   t_eq "$(printf '2026-10-20\tsubagent_sonnet\tbypass\t1\n2026-10-20\tsubagent_sonnet\tfired\t3')" "$(cat "$(CD)/pending.tsv")"
   t_eq "$T0" "$(cat "$(CD)/last_sent")"
@@ -48,7 +48,7 @@ test_body_is_strictly_names_and_numbers() {
   t_lacks "$body" secret
   local rest
   rest=$(printf '%s' "$body" | sed -E 's/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"[a-z_]+","counter":"(fired|skipped|bypass)","value":[0-9]+\}//g; s/\{"day":"[0-9]{4}-[0-9]{2}-[0-9]{2}","method_id":"limit_guard","counter":"(window_reset|window_reached)","value":[0-9]+\}//g')
-  t_eq '{"plugin_version":"0.6.1","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.6.1"/"0.6.1",/')"
+  t_eq '{"plugin_version":"0.7.0","counters":[]}' "$(printf '%s' "$rest" | tr -d ',' | sed 's/"0.7.0"/"0.7.0",/')"
 }
 
 test_flush_is_hourly() {
@@ -150,8 +150,8 @@ test_compact_pressed_travels_alone_and_sums_per_day() {
   aionas_counter_inc handoff compact_pressed
   t_rc 0 aionas_counters_flush
   t_eq 2 "$(t_calls)"
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":1}]}' "$(t_call 1 body)"
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"compact_pressed","value":2}]}' "$(t_call 2 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":1}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"compact_pressed","value":2}]}' "$(t_call 2 body)"
   t_eq "$(printf '2026-10-20\thandoff\tfired\t1')" "$(cat "$(CD)/pending.tsv")"
   t_eq "$(printf '2026-10-20\thandoff\tcompact_pressed\t2')" "$(cat "$(CD)/compact.tsv")"
 }
@@ -203,7 +203,7 @@ test_two_sends_on_one_day_send_the_running_total() {
   aionas_counter_inc subagent_sonnet bypass
   AIONAS_NOW=$((T0 + 3600)) t_rc 0 aionas_counters_flush
   t_eq 2 "$(t_calls)"
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"bypass","value":1},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":5}]}' "$(t_call 2 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"bypass","value":1},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":5}]}' "$(t_call 2 body)"
 }
 
 test_an_unchanged_total_is_not_sent_again() {
@@ -233,11 +233,11 @@ test_utc_day_rollover_sends_each_day_its_own_total_then_prunes_the_old_day() {
   AIONAS_NOW=$d1 aionas_counter_inc subagent_sonnet fired 3
   AIONAS_NOW=$((d1 + 3600)) aionas_counter_inc subagent_sonnet fired 2   # 2026-10-21T00:00Z
   AIONAS_NOW=$((d1 + 3600)) t_rc 0 aionas_counters_flush
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":3},{"day":"2026-10-21","method_id":"subagent_sonnet","counter":"fired","value":2}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":3},{"day":"2026-10-21","method_id":"subagent_sonnet","counter":"fired","value":2}]}' "$(t_call 1 body)"
   t_eq "$(printf '2026-10-21\tsubagent_sonnet\tfired\t2')" "$(cat "$(CD)/pending.tsv")"
   AIONAS_NOW=$((d1 + 7200)) aionas_counter_inc subagent_sonnet fired
   AIONAS_NOW=$((d1 + 7200 + 3600)) t_rc 0 aionas_counters_flush
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-21","method_id":"subagent_sonnet","counter":"fired","value":3}]}' "$(t_call 2 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-21","method_id":"subagent_sonnet","counter":"fired","value":3}]}' "$(t_call 2 body)"
 }
 
 test_totals_are_kept_per_method_and_counter() {
@@ -248,7 +248,7 @@ test_totals_are_kept_per_method_and_counter() {
   t_rc 0 aionas_counters_flush
   AIONAS_NOW=$((T0 + 3600)) aionas_counter_inc handoff fired
   AIONAS_NOW=$((T0 + 3600)) t_rc 0 aionas_counters_flush
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":3},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":1}]}' "$(t_call 2 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":3},{"day":"2026-10-20","method_id":"subagent_sonnet","counter":"fired","value":1}]}' "$(t_call 2 body)"
 }
 
 test_concurrent_sessions_add_up() {
@@ -287,7 +287,7 @@ test_a_flush_killed_after_the_totals_were_written_does_not_double_count() {
   # The state such a flush leaves: the total with its input named, the input still there.
   printf '2026-10-20\thandoff\tfired\t3\nconsumed\t%s\n' "$ev" >"$(CD)/totals.tsv"
   t_rc 0 aionas_counters_flush
-  t_eq '{"plugin_version":"0.6.1","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":3}]}' "$(t_call 1 body)"
+  t_eq '{"plugin_version":"0.7.0","counters":[{"day":"2026-10-20","method_id":"handoff","counter":"fired","value":3}]}' "$(t_call 1 body)"
   t_eq "" "$(ls "$(CD)/spool")"
   aionas_counter_inc handoff fired
   AIONAS_NOW=$((T0 + 3600)) t_rc 0 aionas_counters_flush

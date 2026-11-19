@@ -9,7 +9,7 @@
 # a failed check is retried the next day only), on an enrolled computer only:
 #   1. GET <gateway>/enroll/v1/scripts/manifest (enrollment alias, like every
 #      /enroll/v1 call). Only a 200 with valid JSON is used.
-#   2. For each of the four fixed names that is ALREADY installed as a regular
+#   2. For each of the six fixed names that is ALREADY installed as a regular
 #      file, and whose AIONAS_RELEASE stamp differs from the manifest version:
 #      download it from the PUBLIC route /api/aionas/onboarding/scripts/<name>
 #      WITHOUT the alias, from the enrolled gateway only (https, or http for

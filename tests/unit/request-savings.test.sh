@@ -28,7 +28,7 @@ test_a_mark_takes_the_sessions_current_prompt_and_is_one_exact_post() {
   t_eq POST "$(t_call 1 method)"
   t_eq https://gw.example.test/enroll/v1/savings/requests "$(t_call 1 url)"
   t_contains "$(t_call 1 headers)" "Authorization: Bearer $T_ALIAS"
-  t_eq '{"session_id":"sess-1","prompt_id":"prompt-9","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1"}' "$(t_call 1 body)"
+  t_eq '{"session_id":"sess-1","prompt_id":"prompt-9","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0"}' "$(t_call 1 body)"
   t_eq 0 "$(spooled)"
 }
 
@@ -61,7 +61,7 @@ test_an_interrupted_turns_mark_never_goes_to_the_next_turn() {
   # (cancelled: no Stop for A)
   submit sess-1 prompt-B
   stop_in sess-1 prompt-B | bash "$STOPHOOK"
-  t_eq '{"session_id":"sess-1","prompt_id":"prompt-A","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1"}' "$(bodies)"
+  t_eq '{"session_id":"sess-1","prompt_id":"prompt-A","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0"}' "$(bodies)"
   t_lacks "$(bodies)" prompt-B
 }
 
@@ -84,8 +84,8 @@ test_tokens_are_kept_and_each_method_is_its_own_post() {
   aionas_request_mark sess-1 subagent_sonnet
   t_rc 0 aionas_requests_flush
   t_eq 2 "$(t_calls)"
-  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"handoff","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1","tokens":1500}' "$(bodies | grep handoff)"
-  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1"}' "$(bodies | grep subagent_sonnet)"
+  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"handoff","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0","tokens":1500}' "$(bodies | grep handoff)"
+  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0"}' "$(bodies | grep subagent_sonnet)"
 }
 
 test_two_prompts_are_two_records() {

@@ -2,6 +2,14 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
+## 0.7.0 (2026-11-20)
+
+- **A warning before your 5-hour Claude window or Fable's weekly cap runs out** (AIO‑1083): from 80% the band shows one warning row with the percentage and the reset time, and sub-agents run on Sonnet until the window resets. At 90% you get one toast per window suggesting `/model sonnet`. The plugin never switches your main model: that stays your choice. The effort grant (xhigh, max) is held while the warning is on. A reading that is stale, from a past window, from the future or malformed is ignored (no warning, no count). It reads local files only, runs only when the gateway lists the `limit_guard` capability, and counts `fired`, `skipped`, `window_reached` and `window_reset` under the method `limit_guard`. New: `lib/limit-guard.sh`. **Needs gateway v0.33.0.**
+- **The plugin knows whether it runs in Cursor and runs only what fits Cursor** (AIO‑1077): hooks that need Claude Code's mod, band or settings stay out of Cursor; counts and per-turn records from Cursor are kept apart and tagged `client` = `cursor`, sent only when the gateway's policy lists `counters_client` / `requests_client` (an older gateway gets exactly the 0.6.1 bodies for Claude Code, and Cursor rows wait). The 15-second stall at the end of a turn is gone.
+- **A handoff offer in Cursor** (AIO‑1079): on the stop that crosses the handoff threshold, Cursor gets one offer to continue in a new conversation.
+- **The Cursor reporter script updates itself too** (AIO‑1076): the script refresh now also covers `aionas-cursor-hooks-reporter.sh` and `.ps1` (when already installed), and lists the new sha256 of the plan collector and the status-line taps (they carry a release stamp and the window figures the guard reads). Same checks as before: listed sha256 only, atomic replace, `.prev` kept a day.
+- **What leaves the computer:** one new optional field `client` (`cursor`) on counter rows and per-turn records, and the new counter names `window_reset` and `window_reached` under `limit_guard`. Numbers and names only; nothing else.
+
 ## 0.6.1 (2026-11-19)
 
 - **Second review round (AIO‑1072):** the settings rewrite's temporary file is created exclusively with `mktemp` (a planted file or link at a predictable name can no longer be written through), and the usage probe follows a `claude` symlink chain to its end (at most 40 hops) and refuses it if any folder on the way is inside the workspace.

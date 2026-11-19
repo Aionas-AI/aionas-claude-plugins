@@ -2,6 +2,10 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
+## Unreleased
+
+- **Reports each session's git branch, for Work Items** (AIO‑1019): a new `UserPromptSubmit` hook, `branch-report.sh`, runs in the background and never delays the prompt. It reads only `session_id` and `cwd` from the hook input, asks git for the branch and commit of that folder, and sends `{session_id, branch, head_sha, observed_at}` plus the repository's bare name (worked out on the computer from the origin remote; the URL, which can carry a user or a token, never leaves) to `POST /enroll/v1/cc-session-git` with the enrollment alias, once per change per session (a failed send is retried on the next prompt). The prompt and the folder path are never read, kept or sent. Outside a repository, on a detached HEAD, without git or on a computer that is not enrolled, nothing is sent. Egress manifest: one new route.
+
 ## 0.6.1 (2026-11-19)
 
 - **Second review round (AIO‑1072):** the settings rewrite's temporary file is created exclusively with `mktemp` (a planted file or link at a predictable name can no longer be written through), and the usage probe follows a `claude` symlink chain to its end (at most 40 hops) and refuses it if any folder on the way is inside the workspace.

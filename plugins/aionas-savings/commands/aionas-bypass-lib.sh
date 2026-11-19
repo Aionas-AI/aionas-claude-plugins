@@ -19,7 +19,6 @@ AIONAS_PENDING_MAX=20
 aionas_cmd_method() {
   _cm=$(printf '%s' "$1" | tr 'A-Z-' 'a-z_')
   case "$_cm" in
-    trim | output | long_output_store | noisy | guard | noisy_command_guard | noisy_guard | output_store) _cm=output_trim ;;
     effort) _cm=effort_default ;;
     subagent | subagents | subagent_model) _cm=subagent_sonnet ;;
     unused | unused_mcp) _cm=unused_services ;;
@@ -200,7 +199,7 @@ aionas_effort_request_level() {
 
 # The client methods in the band's chip order (cache_alert, seat_fit and the
 # required cache_guard never get a chip).
-AIONAS_BAND_METHODS="effort_default subagent_sonnet output_trim handoff unused_services write_minimum"
+AIONAS_BAND_METHODS="effort_default subagent_sonnet handoff unused_services write_minimum"
 AIONAS_BAND_NAME_MAX=80
 AIONAS_POLICY_SYNC_INTERVAL=${AIONAS_POLICY_SYNC_INTERVAL:-3600}
 
@@ -320,7 +319,11 @@ aionas_band_methods() {
     case "$_bm_grant" in high | xhigh | max | free) ;; *) _bm_grant=- ;; esac
   fi
   set --
-  for _bm_f in "$_bm_dir/counters/queue.tsv" "$_bm_dir/counters/pending.tsv" "$_bm_dir"/counters/batch.*; do
+  # Today's totals (lib/counters.sh) and the increments not folded in yet;
+  # before the first fold, what a 0.6.0 build queued.
+  _bm_tot="$_bm_dir/counters/totals.tsv"
+  [ -f "$_bm_tot" ] || _bm_tot="$_bm_dir/counters/pending.tsv"
+  for _bm_f in "$_bm_tot" "$_bm_dir/counters/queue.tsv" "$_bm_dir"/counters/batch.* "$_bm_dir"/counters/spool/*.ev; do
     [ -f "$_bm_f" ] && set -- "$@" "$_bm_f"
   done
   awk -F '\t' -v now="$(aionas_now)" -v today="$(aionas_day_utc)" -v methods="$AIONAS_BAND_METHODS" \
@@ -524,16 +527,22 @@ aionas_subagent_model() {
   esac
 }
 
-# aionas_subagent_count [SESSION]: count one sub-agent start for
-# subagent_sonnet (W25P-P4, AIO-898 item 7): fired when the method is active
-# for this session (the test effort-window.sh uses for effort_default), else
-# skipped. One count per call; nothing is counted on a computer the one
-# install never enrolled. Prints nothing; exit 0 always.
+# aionas_subagent_count SESSION OUTCOME: one sub-agent start that could take
+# subagent_sonnet (W25P-P4, AIO-898 item 7, AIO-1073). The mod runs it after
+# the start, and only for an agent that chose no model of its own, is no
+# fork and whose parent is not on Sonnet; OUTCOME says whether the policy
+# moved it to Sonnet ("moved") or not ("kept"). Moved while the method is
+# active for this session: fired, and one record for the session's current
+# prompt. Kept while the method is not active: skipped. Anything else counts
+# nothing. Nothing is counted on a computer the one install never enrolled.
+# Prints nothing; exit 0 always.
 aionas_subagent_count() {
   aionas_enroll_has_alias || return 0
   if aionas_policy_active subagent_sonnet "${1:-}"; then
+    [ "${2:-}" = moved ] || return 0
     aionas_counter_inc subagent_sonnet fired >/dev/null 2>&1
-  else
+    aionas_request_mark "${1:-}" subagent_sonnet >/dev/null 2>&1
+  elif [ "${2:-}" = kept ]; then
     aionas_counter_inc subagent_sonnet skipped >/dev/null 2>&1
   fi
   return 0

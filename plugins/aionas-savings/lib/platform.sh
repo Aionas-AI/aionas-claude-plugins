@@ -41,10 +41,37 @@ aionas_savings_dir() {
   echo "$(aionas_agent_dir)/savings"
 }
 
-# aionas_mkdir DIR: create DIR (and parents) private to the user.
+# aionas_dir_private DIR (AIO-1072, finding 5): exit 0 only when DIR is a real
+# directory (not a symlink), owned by the user, that nobody else can write to.
+# Group or other read bits are dropped (mode 0700); a folder others can write
+# to is refused and left as it is (something could already sit in it). On
+# Windows (Git Bash shows made-up modes and owners) only the symlink check runs.
+aionas_dir_private() {
+  [ ! -L "$1" ] && [ -d "$1" ] || return 1
+  [ "$(aionas_os)" = windows ] && return 0
+  [ -O "$1" ] || return 1
+  _dp_m=$(ls -ld "$1" 2>/dev/null) || return 1
+  case "$_dp_m" in ?????w* | ????????w*) return 1 ;; esac
+  case "$_dp_m" in drwx------*) return 0 ;; esac
+  chmod 700 "$1" 2>/dev/null || return 1
+  case "$(ls -ld "$1" 2>/dev/null)" in drwx------*) return 0 ;; esac
+  return 1
+}
+
+# aionas_mkdir DIR: create DIR (and parents) private to the user, and check it
+# with aionas_dir_private. A DIR inside the state folder checks the state
+# folder too. Exit 1 (nothing created inside) when either is not private: the
+# caller then writes and sends nothing.
 aionas_mkdir() {
-  [ -d "$1" ] && return 0
-  (umask 077 && mkdir -p "$1")
+  _md_s=$(aionas_savings_dir)
+  case "$1" in "$_md_s"/*) set -- "$_md_s" "$1" ;; esac
+  for _md_d in "$@"; do
+    if [ ! -d "$_md_d" ] && [ ! -L "$_md_d" ]; then
+      (umask 077 && mkdir -p "$_md_d") 2>/dev/null || return 1
+    fi
+    aionas_dir_private "$_md_d" || return 1
+  done
+  return 0
 }
 
 # aionas_write_atomic FILE: stdin -> FILE, all or nothing (temp file + rename).
@@ -85,6 +112,19 @@ aionas_lock_release() {
   _lk="$(aionas_savings_dir)/locks/$1.lock"
   rm -f "$_lk/t"
   rmdir "$_lk" 2>/dev/null
+  return 0
+}
+
+# aionas_local_count NAME: add one to a local number under savings/counters/NAME.
+# Never sent: the gateway's closed counter list does not know these names (it
+# would reject the whole batch), so it never goes through aionas_counter_inc.
+aionas_local_count() {
+  _tl_d="$(aionas_savings_dir)/counters"
+  aionas_mkdir "$_tl_d" || return 0
+  _tl_n=$(cat "$_tl_d/$1" 2>/dev/null)
+  aionas_is_uint "${_tl_n:-x}" || _tl_n=0
+  [ "$_tl_n" -lt 1000000000 ] || return 0
+  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/$1"
   return 0
 }
 

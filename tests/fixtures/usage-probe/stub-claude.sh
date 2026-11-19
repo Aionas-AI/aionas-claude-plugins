@@ -1,7 +1,7 @@
 #!/bin/bash
 # A stand-in for the claude binary (tests/unit/usage-probe.test.sh). It never
 # calls a model or the network. Each run logs under $STUB_LOG/run.<n>/:
-#   argv0 argv cwd probe_env stdin env pid [hooks] [hook_rc] [hooks_changed]
+#   argv0 argv cwd probe_env stdin env allenv pid [hooks] [hook_rc] [hooks_changed]
 # and then behaves as STUB_MODE says:
 #   ok (default)       print the file $STUB_OUTPUT
 #   exit1              print it, exit 1
@@ -12,6 +12,11 @@
 #                      $d/written), stop by itself after 8 MB
 # STUB_DELAY=<s> sleeps before printing. STUB_HOOK_LIST=<file> runs every script
 # named in the file (one path per line) with this process's environment first.
+# The probe starts the child with a minimal environment: the settings come
+# from $HOME/.stub-env (written by the test's hook()), read after the
+# environment the probe gave is noted.
+_allenv=$(/usr/bin/env | sort)
+if [ -z "${STUB_LOG:-}" ] && [ -f "$HOME/.stub-env" ]; then . "$HOME/.stub-env"; fi
 log=${STUB_LOG:?}
 n=1
 while ! mkdir "$log/run.$n" 2>/dev/null; do n=$((n + 1)); done
@@ -21,6 +26,7 @@ printf '%s\n' "$@" >"$d/argv"
 pwd >"$d/cwd"
 printf '%s' "${AIONAS_USAGE_PROBE-UNSET}" >"$d/probe_env"
 /usr/bin/env | grep '^AIONAS_' | sort >"$d/env"
+printf '%s\n' "$_allenv" >"$d/allenv"
 echo $$ >"$d/pid"
 if IFS= read -r -t 1 _l; then
   echo data >"$d/stdin"

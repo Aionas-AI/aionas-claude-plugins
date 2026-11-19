@@ -21,6 +21,15 @@ aionas_json_type() {
   awk -F '\t' -v p="$1" '$1 == p { print $2; f = 1; exit } END { exit f ? 0 : 1 }'
 }
 
+# aionas_json_get_str PATH: like aionas_json_get for a string value, with its
+# JSON escapes decoded (aionas_json_unescape): the form to use for a file path
+# (AIO-1072, finding 10: C:\\Users\\... and \" are escaped in the JSON). Exit 1
+# when PATH is absent or not a string.
+aionas_json_get_str() {
+  awk -F '\t' -v p="$1" '$1 == p { if ($2 == "s") { print $3; f = 1 } exit } END { exit f ? 0 : 1 }' |
+    aionas_json_unescape | awk '{ print } END { exit NR ? 0 : 1 }'
+}
+
 # aionas_json_unescape: decode the JSON string escapes of each stdin line
 # (\" \\ \/ \b \f \n \r \t; \uXXXX below 0x80 becomes the character, others
 # stay as written).

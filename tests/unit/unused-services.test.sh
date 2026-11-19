@@ -41,7 +41,7 @@ call() {
 slash() { printf '{"type":"user","message":{"role":"user","content":"<command-name>/%s</command-name> SECRET-PROMPT-TEXT"},"timestamp":"%s"}\n' "$2" "$(iso $((T0 - $1)))" >>"$HIST"; }
 hook() { printf '{"session_id":"s1","hook_event_name":"SessionStart","cwd":"%s"}' "${1:-$HOME/work/proj}" | bash "$HOOK"; }
 disabled() { aionas_unused_j items "$CJ" "" projects "$PK" disabledMcpServers | tr '\n' ' '; }
-queue() { cat "$(aionas_savings_dir)/counters/queue.tsv" 2>/dev/null | cut -f2- | sort | uniq -c | sed 's/^ *//' | tr '\n' ';'; }
+queue() { t_counters | cut -f2- | sort | uniq -c | sed 's/^ *//' | tr '\n' ';'; }
 ud() { echo "$(aionas_savings_dir)/unused"; }
 
 test_turns_off_only_servers_with_no_call_in_30_days() {
@@ -58,7 +58,7 @@ test_turns_off_only_servers_with_no_call_in_30_days() {
   t_contains "$(cat "$CJ")" '"numStartups": 12'
   t_contains "$(cat "$CJ")" '"allowedTools": []'
   # one counter per turn-off, numbers only
-  t_eq 2 "$(awk -F '\t' '$2 == "unused_services" && $3 == "fired" { n += $4 } END { print n }' "$(aionas_savings_dir)/counters/queue.tsv")"
+  t_eq 2 "$(t_counters | awk -F '\t' '$2 == "unused_services" && $3 == "fired" { n += $4 } END { print n }')"
 }
 
 test_notice_is_one_line_shown_once_in_the_next_session() {
@@ -91,7 +91,7 @@ test_person_turns_one_back_on_and_it_stays_on_for_30_days() {
   AIONAS_NOW=$((T0 + DAY)) hook
   t_eq "gamma " "$(disabled)"
   t_eq "mcp	beta	$((T0 + DAY))" "$(cat "$(ud)/reenabled.tsv")" "the turn-on is recorded"
-  t_eq 1 "$(awk -F '\t' '$2 == "unused_services" && $3 == "bypass" { n += $4 } END { print n + 0 }' "$(aionas_savings_dir)/counters/queue.tsv")" "the turn-on is counted"
+  t_eq 1 "$(t_counters | awk -F '\t' '$2 == "unused_services" && $3 == "bypass" { n += $4 } END { print n + 0 }')" "the turn-on is counted"
   AIONAS_NOW=$((T0 + 20 * DAY)) call 1 mcp__alpha__x
   AIONAS_NOW=$((T0 + 20 * DAY)) hook
   t_eq "gamma " "$(disabled)"
@@ -133,7 +133,7 @@ test_runs_once_per_utc_day() {
   call $((40 * DAY)) mcp__beta__x
   hook
   t_eq "beta " "$(disabled)"
-  t_eq 1 "$(wc -l <"$(aionas_savings_dir)/counters/queue.tsv" | tr -d ' ')"
+  t_eq 1 "$(t_counters | wc -l | tr -d ' ')"
   t_eq "$(aionas_day_utc)" "$(cat "$(ud)/last_run_day")"
   # a second session the same day does not scan again
   call $((40 * DAY)) mcp__gamma__x

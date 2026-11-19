@@ -67,29 +67,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handoff-cancel.sh\"",
             "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
+          },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/noisy-guard.sh\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/output-store.sh\"",
-            "timeout": 30
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/request-prompt.sh\"",
+            "timeout": 5
           }
         ]
       }

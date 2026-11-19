@@ -3,6 +3,8 @@
 # $FAKE_CURL_LOG/<n>/ (args, method, url, headers, body) and answers with
 # FAKE_CURL_STATUS (default 200) and the file FAKE_CURL_BODY, or exits with
 # FAKE_CURL_EXIT (e.g. 28, a timeout) printing "000" like curl -w does.
+# FAKE_CURL_RC answers as usual, then exits with that code (curl failed after
+# the status line, e.g. 23 or 63).
 set -u
 log=${FAKE_CURL_LOG:?}
 mkdir -p "$log"
@@ -24,7 +26,7 @@ while [ $# -gt 0 ]; do
     --data-binary) case "$2" in @*) cat "${2#@}" >"$d/body" ;; *) printf '%s' "$2" >"$d/body" ;; esac; shift ;;
     -o) out=$2; shift ;;
     -w) wfmt=$2; shift ;;
-    --connect-timeout | --max-time | --retry | --max-filesize) shift ;;
+    --connect-timeout | --max-time | --retry | --max-filesize | --proto | --max-redirs) shift ;;
     -*) ;;
     *) url=$1 ;;
   esac
@@ -41,4 +43,4 @@ if [ -n "$out" ]; then
   if [ -n "${FAKE_CURL_BODY:-}" ]; then cat "$FAKE_CURL_BODY" >"$out"; else : >"$out"; fi
 fi
 [ -n "$wfmt" ] && printf '%s' "${FAKE_CURL_STATUS:-200}"
-exit 0
+exit "${FAKE_CURL_RC:-0}"

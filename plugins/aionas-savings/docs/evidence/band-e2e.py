@@ -12,7 +12,7 @@
 #   band-1-one-line       variant 1: the one line (who, saved today, chips, More)
 #   band-3-warning-row    variant 3: after one turn the stub reports a 214K
 #                         context: the warning row with /compact and Later
-#   band-7-chip-pressed   variant 7b: the guard chip pressed -> off until HH:MM
+#   band-7-chip-pressed   variant 7b: the write-min chip pressed -> off until HH:MM
 #                         (and pressed again: back on, band-7-chip-pressed-again)
 #   band-2-full-view      variant 2: More pressed
 #
@@ -33,7 +33,7 @@ POLICY = {
     'methods': [
         {'method_id': m, 'state': 'off' if m == 'handoff' else 'on', 'required': False, 'self_override_allowed': True,
          'self_release_allowed': True, **({'params': {'threshold_tokens': 200000, 'idle_minutes': 55}} if m == 'handoff' else {})}
-        for m in ['effort_default', 'subagent_sonnet', 'noisy_guard', 'output_store', 'handoff', 'unused_services', 'write_minimum']
+        for m in ['effort_default', 'subagent_sonnet', 'handoff', 'unused_services', 'write_minimum']
     ] + [{'method_id': 'cache_guard', 'state': 'on', 'required': True, 'self_override_allowed': False, 'self_release_allowed': False}],
     'overrides': [],
     # Example names and numbers (fixture), as the gateway lane will send them.
@@ -455,12 +455,12 @@ def main():
             send('\x1b', 1)
             return False
 
-        ok = press(r'guard') and ok
-        if not until(r'◌ guard · off until', 10):
+        ok = press(r'write-min') and ok
+        if not until(r'◌ write-min · off until', 10):
             print('chip press not seen:\n' + scr.text()); ok = False
-        shot('band-7-chip-pressed', 'variant 7b: one click on the guard chip -> bypassed for 1 hour, on this computer at once')
-        ok = press(r'guard') and ok
-        if not until(r'\[ ● guard \]', 10):
+        shot('band-7-chip-pressed', 'variant 7b: one click on the write-min chip -> bypassed for 1 hour, on this computer at once')
+        ok = press(r'write-min') and ok
+        if not until(r'\[ ● write-min \]', 10):
             print('second press not seen:\n' + scr.text()); ok = False
         shot('band-7-chip-pressed-again', 'variant 7b: a second click on the chip -> back on (--end, no network call)')
         ok = press(r'More') and ok

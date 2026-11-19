@@ -17,7 +17,12 @@
 #   3. Install it only if the sha256 equals the manifest's (hash tool at a
 #      fixed system path, never PATH; none found = nothing installed), a .sh
 #      starts with "#!", and the stamp inside the bytes equals the version
-#      (else it would never converge). The new file is written next to the old
+#      (else it would never converge), and (AIO-1072, finding 2) the script,
+#      with its release line set back to the placeholder, has a sha256 listed
+#      for its name in security/script-allowlist.txt, which ships inside this
+#      plugin (a GitHub release under code-owner review, not the gateway). A
+#      refused script is counted locally (counters/script_refresh_refused,
+#      never sent). The new file is written next to the old
 #      one and renamed over it (a running bash reads its script lazily, so an
 #      in-place write could break it); the old one is kept as <name>.prev
 #      until a later day. Any failed check keeps the old file.
@@ -46,9 +51,12 @@ aionas_lock_try script-refresh 120 || exit 0
 
 _sr_tmp=""
 _sr_mf="$dir/script-refresh.manifest.$$"
+_sr_norm="$dir/script-refresh.norm.$$"
+# The allow-list next to this hook, never from a variable or the gateway.
+_sr_allow="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/security/script-allowlist.txt"
 _sr_finish() {
   if [ -n "$_sr_tmp" ]; then rm -f "$_sr_tmp"; fi
-  rm -f "$_sr_mf"
+  rm -f "$_sr_mf" "$_sr_norm"
   aionas_lock_release script-refresh
 }
 trap _sr_finish EXIT
@@ -69,8 +77,8 @@ for _sr_n in $AIONAS_SR_NAMES; do
 done
 if [ "$_sr_prevday" != "$today" ]; then rm -f "$dir/script-refresh.prevday"; fi
 # A killed run's manifest download: removed by exact matched name, one at a time.
-for _sr_f in "$dir"/script-refresh.manifest.*; do
-  case "${_sr_f##*script-refresh.manifest.}" in '' | *[!0-9]*) continue ;; esac
+for _sr_f in "$dir"/script-refresh.manifest.* "$dir"/script-refresh.norm.*; do
+  case "${_sr_f##*.}" in '' | *[!0-9]*) continue ;; esac
   if [ -f "$_sr_f" ] || [ -L "$_sr_f" ]; then rm -f -- "$_sr_f"; fi
 done
 
@@ -88,6 +96,11 @@ _sr_one() {
     [ "$(aionas_sr_sha256 "$_sr_tmp")" != "$3" ] ||
     [ "$(aionas_sr_stamp "$_sr_tmp" "$1")" != "$2" ]; then
     rm -f "$_sr_tmp"; _sr_tmp=""; return 1
+  fi
+  if ! aionas_sr_allowed "$_sr_allow" "$1" "$_sr_tmp" "$_sr_norm"; then
+    rm -f "$_sr_tmp"; _sr_tmp=""
+    aionas_local_count script_refresh_refused
+    return 1
   fi
   case "$1" in
     *.sh) [ "$(head -c 2 "$_sr_tmp")" = '#!' ] || { rm -f "$_sr_tmp"; _sr_tmp=""; return 1; } ;;

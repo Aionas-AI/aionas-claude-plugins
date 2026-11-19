@@ -1,0 +1,13 @@
+# Scripts in ~/.aionas/agent/tools that hooks/script-refresh.sh may install
+# (AIO-1072). One line per script: <name> <sha256>. The sha256 is of the script
+# as the gateway keeps it, with the release line still holding the placeholder
+# (AIONAS_RELEASE='__AIONAS_RELEASE__'), i.e. the bytes of the gateway repo's
+# transports/aionasonboardingscripts/scripts_generated/<name>. A gateway
+# release that changes one of these scripts needs its new line here, in a
+# plugin release, before computers take it. Older lines may stay (no rollback
+# to a script that was never listed).
+# gateway v0.28.0 .. v0.31.2 (unchanged since v0.28.0)
+aionas-plan-usage.sh b4ca3de9144a6b2e77f3790874fd716237e24af3dfe183fc0b3def2816a1f963
+aionas-statusline-tap.sh 268484f2ec99497ac22224a156337fd09e72a032c729340ec559c3d761535818
+aionas-plan-usage.ps1 2b162cb17bf42cffdad32c774ac73d55a654ab682d174e4e2904b673eea7ac54
+aionas-statusline-tap.ps1 520233b35114f23736e4a9d06b156c04da73afb73e422b3dfe4b5a313c52b3f5

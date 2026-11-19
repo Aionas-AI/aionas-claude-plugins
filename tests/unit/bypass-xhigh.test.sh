@@ -17,38 +17,36 @@ blocked_policy() { # cache a policy where self-override is blocked for METHOD
 
 test_bypass_self_with_reason_is_stored_and_local() {
   t_enroll; export AIONAS_NOW=$T0; answer 201 self ovr_a
-  local out; out=$(bash "$BYPASS" output_trim 1h debugging a flaky test)
+  local out; out=$(bash "$BYPASS" unused_services 1h debugging a flaky test)
   t_eq 0 $?
   t_eq 1 "$(t_calls)"
   t_eq POST "$(t_call 1 method)"
   t_eq https://gw.example.test/enroll/v1/savings/overrides "$(t_call 1 url)"
-  t_eq '{"method_id":"output_trim","duration_seconds":3600,"reason":"debugging a flaky test"}' "$(t_call 1 body)"
-  t_contains "$out" "output_trim is off for you for 1 hour"
+  t_eq '{"method_id":"unused_services","duration_seconds":3600,"reason":"debugging a flaky test"}' "$(t_call 1 body)"
+  t_contains "$out" "unused_services is off for you for 1 hour"
   t_contains "$out" "Reason: debugging a flaky test."
-  t_not aionas_policy_active output_trim
-  t_ok aionas_policy_bypassed output_trim
-  t_contains "$(cat "$(aionas_savings_dir)/counters/queue.tsv")" "$(printf 'output_trim\tbypass\t1')"
+  t_not aionas_policy_active unused_services
+  t_ok aionas_policy_bypassed unused_services
+  t_contains "$(t_counters)" "$(printf 'unused_services\tbypass\t1')"
 }
 
 test_bypass_without_reason_sends_no_reason_and_alias_maps() {
   t_enroll; answer 201 self ovr_b
-  local out; out=$(bash "$BYPASS" long_output_store 1h)
-  t_eq '{"method_id":"output_trim","duration_seconds":3600}' "$(t_call 1 body)"
+  local out; out=$(bash "$BYPASS" unused 1h)
+  t_eq '{"method_id":"unused_services","duration_seconds":3600}' "$(t_call 1 body)"
   t_lacks "$out" Reason
-  t_ok aionas_policy_bypassed output_trim
-  # The two ids output_trim replaced (AIO-883) are aliases of it.
+  t_ok aionas_policy_bypassed unused_services
+  # Tool output trimming is no longer a method (AIO-1073): its names are refused.
   . "$T_PLUGIN/commands/aionas-bypass-lib.sh"
-  t_eq output_trim "$(aionas_cmd_method noisy_guard)"
-  t_eq output_trim "$(aionas_cmd_method output_store)"
-  t_eq output_trim "$(aionas_cmd_method trim)"
+  local n; for n in output_trim noisy_guard output_store trim guard; do t_rc 2 aionas_cmd_method "$n"; done
 }
 
 test_bypass_blocked_prints_sent_for_approval_and_changes_nothing() {
-  t_enroll; blocked_policy output_trim; answer 202 requested ovr_c
-  local out; out=$(bash "$BYPASS" output_trim 2h why not)
+  t_enroll; blocked_policy unused_services; answer 202 requested ovr_c
+  local out; out=$(bash "$BYPASS" unused_services 2h why not)
   t_eq 0 $?
   t_contains "$out" "sent for approval"
-  t_eq '{"method_id":"output_trim","duration_seconds":7200,"reason":"why not"}' "$(t_call 1 body)"
+  t_eq '{"method_id":"unused_services","duration_seconds":7200,"reason":"why not"}' "$(t_call 1 body)"
   t_not test -f "$(aionas_savings_dir)/local-overrides.tsv"
 }
 
@@ -133,18 +131,19 @@ test_bypass_400_changes_nothing() {
 test_list_rows_for_the_band() {
   t_enroll
   local out; out=$(bash "$BYPASS" --list)
-  t_contains "$out" "$(printf 'output_trim\toff\t0\t1')" "off by default (AIO-883)"
+  t_contains "$out" "$(printf 'unused_services\ton\t1\t1')"
+  t_lacks "$out" output_trim
   t_contains "$out" "$(printf 'compact_at\t200000')"
   t_lacks "$out" cache_guard
-  blocked_policy output_trim
+  blocked_policy unused_services
   out=$(bash "$BYPASS" --list)
-  t_contains "$out" "$(printf 'output_trim\ton\t1\t0')"
+  t_contains "$out" "$(printf 'unused_services\ton\t1\t0')"
 }
 
 test_count_entrypoint_takes_closed_names_only() {
   t_rc 0 bash "$BYPASS" --count write_minimum fired
   t_rc 2 bash "$BYPASS" --count write_minimum prompt_text
-  t_eq 1 "$(wc -l <"$(aionas_savings_dir)/counters/queue.tsv" | tr -d ' ')"
+  t_eq 1 "$(t_counters | wc -l | tr -d ' ')"
 }
 
 test_xhigh_self_opens_a_10_minute_window_with_reason() {
@@ -185,7 +184,7 @@ test_xhigh_never_touches_claude_settings() {
 
 test_bodies_carry_no_content_beyond_the_typed_reason() {
   t_enroll; answer 201 self ovr_p
-  bash "$BYPASS" output_trim 1h a reason >/dev/null
+  bash "$BYPASS" unused_services 1h a reason >/dev/null
   bash "$XHIGH" >/dev/null
   local b
   b=$(t_call 1 body; t_call 2 body)

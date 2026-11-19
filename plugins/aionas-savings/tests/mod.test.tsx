@@ -6,6 +6,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { MockClock } from 'claude-code/testing'
+import { subagentOutcome } from '../hooks/mod.tsx'
 
 const T0 = 1792490400 // 2026-10-20T10:00:00Z; the fixture's clock is UTC+3
 const SURFACES = ['terminal', 'desktop'] as const
@@ -24,7 +25,7 @@ const BAND = {
 } as const
 
 type M = { state: 'on' | 'off'; active: 0 | 1; so: 0 | 1; released: 0 | 1; until: number; pending: 0 | 1; fired: number }
-const ORDER = ['effort_default', 'subagent_sonnet', 'output_trim', 'handoff', 'unused_services', 'write_minimum']
+const ORDER = ['effort_default', 'subagent_sonnet', 'handoff', 'unused_services', 'write_minimum']
 
 type World = {
   argv: string[][]
@@ -43,6 +44,7 @@ type World = {
   now: number
   bandReads: () => number
   clock: MockClock
+  sessionId: string
   toasts: string[]
   // Windows only: the bash.exe paths that start (a `-c true` exits 0 there), and the paths recorded for support.
   files: string[]
@@ -73,7 +75,7 @@ function world(on: On, grant: string = 'high'): World {
   const methods: Record<string, M> = {}
   for (const id of ORDER) methods[id] = { state: 'on', active: 1, so: 1, released: 0, until: 0, pending: 0, fired: 0 }
   methods.handoff = { ...(methods.handoff as M), state: 'off', active: 0 }
-  methods.output_trim = { ...(methods.output_trim as M), fired: 4 }
+  methods.subagent_sonnet = { ...(methods.subagent_sonnet as M), fired: 4 }
   const w: World = {
     argv: [],
     envSets: [],
@@ -91,12 +93,13 @@ function world(on: On, grant: string = 'high'): World {
     now: T0,
     bandReads: () => reads,
     clock: mock.clock(on, { now: T0 * 1000 }),
+    sessionId: 'sess-test-1',
     toasts: [],
     files: [],
     recorded: [],
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'sess-test-1' }))
+  on('session.id', () => ({ value: w.sessionId }))
   on('session.cwd', () => ({ value: '/work/my repo' }))
   on('session.surfaces', () => ({ value: w.surfaces }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }))
@@ -141,7 +144,7 @@ function world(on: On, grant: string = 'high'): World {
         w.methods[id] = { ...m, pending: 1 }
         stdout = `${id}: sent for approval to your org admin or lead. It applies from your next session once approved.`
       }
-    } else if (a.includes('aionas-bypass.sh')) stdout = 'output_trim is off for you for 1 hour, from now. Reason: debugging a flaky test.'
+    } else if (a.includes('aionas-bypass.sh')) stdout = 'unused_services is off for you for 1 hour, from now. Reason: debugging a flaky test.'
     else if (a.includes('handoff-wake.sh end')) {
       w.handoff = 'handoff\tended\t0\t0\t0'
       stdout = 'Done: no handoff doc will be written for this chat. A new message here takes it back.'
@@ -238,7 +241,7 @@ describe('band: one line and the full view (M1)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · Acme · mbp-noa · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
-      expect((await chipText(ui, 'output_trim'))).toContain('● trim')
+      expect((await chipText(ui, 'subagent_sonnet'))).toContain('● sonnet subagents')
       expect((await chipText(ui, 'effort_default'))).toBe('● medium · allow more')
       expect((await chipText(ui, 'subagent_sonnet'))).toContain('● sonnet subagents')
       expect(await ui.find({ type: 'Text', text: /^○ handoff$/ })).toBeDefined()
@@ -252,7 +255,7 @@ describe('band: one line and the full view (M1)', () => {
       expect(
         await ui.find({ type: 'Text', text: 'saved since 8 Oct (13 days) ~$46.20 · today ~$3.80 · estimated · updated 13:05' }),
       ).toBeDefined()
-      expect((await chipText(ui, 'output_trim'))).toContain('● trim · 4 today')
+      expect((await chipText(ui, 'subagent_sonnet'))).toContain('● sonnet subagents · 4 today')
       expect((await ui.find({ key: 'aionas-xhigh' }))?.props.label).toBe('allow higher effort for 10 min')
       expect(await ui.find({ key: 'aionas-more' })).toBeUndefined()
 
@@ -272,7 +275,7 @@ describe('band: one line and the full view (M1)', () => {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect(await ui.find({ type: 'Text', text: /^aionas │ subscription │$/ })).toBeDefined()
       expect(await ui.find({ text: /saved since|No saving/ })).toBeUndefined()
-      expect(await ui.find({ key: 'aionas-chip-output_trim' })).toBeDefined()
+      expect(await ui.find({ key: 'aionas-chip-subagent_sonnet' })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -304,20 +307,19 @@ describe('band: one line and the full view (M1)', () => {
   })
 
   test('narrow widths drop the computer, then the org, then the chips past the fourth (+N)', async ($, on) => {
-    // The widths moved by 13 columns when output_trim replaced the guard and store chips (AIO-883).
     world(on)
     await start($)
     for (const surface of SURFACES) {
-      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 196 } })
+      let ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 185 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · mbp-noa · subscription │/ })).toBeDefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 195 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 184 } })
       expect(await ui.find({ type: 'Text', text: /Noa Levi · Acme · subscription │/ })).toBeDefined()
       expect(await ui.find({ text: /mbp-noa/ })).toBeUndefined()
       await ui.unmount()
 
-      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 181 } })
+      ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 170 } })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct/ })).toBeDefined()
       expect(await ui.find({ text: /Acme/ })).toBeUndefined()
       expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeDefined()
@@ -326,10 +328,10 @@ describe('band: one line and the full view (M1)', () => {
       ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 60 } })
       expect(await ui.find({ type: 'Text', text: /aionas │ Noa Levi · subscription │ saved since 8 Oct ~\$46\.20 est\./ })).toBeDefined()
       expect(await ui.find({ text: /Acme|mbp-noa/ })).toBeUndefined()
-      // Six chips since output_trim (AIO-883): four drawn, two more.
-      expect(await ui.find({ key: 'aionas-chip-output_trim' })).toBeDefined()
-      expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeUndefined()
-      expect(await ui.find({ type: 'Text', text: '+2' })).toBeDefined()
+      // Five chips (AIO-1073): four drawn, one more.
+      expect(await ui.find({ key: 'aionas-chip-unused_services' })).toBeDefined()
+      expect(await ui.find({ key: 'aionas-chip-write_minimum' })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: '+1' })).toBeDefined()
       expect(await ui.find({ key: 'aionas-more' })).toBeDefined()
       await ui.unmount()
     }
@@ -413,15 +415,15 @@ describe('band: chips and the one-click bypass (M3)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       const before = scriptRuns(w, 'commands/aionas-bypass.sh').length
-      await ui.press({ key: 'aionas-chip-output_trim' })
+      await ui.press({ key: 'aionas-chip-subagent_sonnet' })
       const runs = scriptRuns(w, 'commands/aionas-bypass.sh').slice(before)
-      expect(runs[0]?.slice(-2)).toEqual(['output_trim', '1h'])
+      expect(runs[0]?.slice(-2)).toEqual(['subagent_sonnet', '1h'])
       expect(runs.some(a => a.includes('--band'))).toBe(true)
-      expect((await chipText(ui, 'output_trim'))).toContain('◌ trim · off until 14:00')
-      await ui.press({ key: 'aionas-chip-output_trim' })
+      expect((await chipText(ui, 'subagent_sonnet'))).toContain('◌ sonnet subagents · off until 14:00')
+      await ui.press({ key: 'aionas-chip-subagent_sonnet' })
       const ended = scriptRuns(w, 'commands/aionas-bypass.sh').find(a => a.includes('--end'))
-      expect(ended?.slice(-2)).toEqual(['--end', 'output_trim'])
-      expect((await chipText(ui, 'output_trim'))).toContain('● trim')
+      expect(ended?.slice(-2)).toEqual(['--end', 'subagent_sonnet'])
+      expect((await chipText(ui, 'subagent_sonnet'))).toContain('● sonnet subagents')
       expect(w.toasts.some(t => t.includes('back on'))).toBe(true)
       expect(w.toasts.some(t => t.includes('off for you for 1 hour'))).toBe(true)
       await ui.unmount()
@@ -526,12 +528,12 @@ describe('band: chips and the one-click bypass (M3)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 300 } })
       await expectTip(ui, surface, 'saved', TIPS_SAVED)
-      await expectTip(ui, surface, 'output_trim', 'Noisy commands are shortened; long output shows only its start, its end and the errors. Click: off for you for 1 hour.')
+      await expectTip(ui, surface, 'subagent_sonnet', 'Sub-agents that do not pick a model run on Sonnet. Click: off for you for 1 hour.')
       await expectTip(ui, surface, 'effort_default', 'New sessions start at medium; high is the most you can pick. Click: for 10 min, new sessions may go up to xhigh or max.')
       await expectTip(ui, surface, 'handoff', 'Off now. A long chat left idle gets a note to go on in a new session.')
-      await ui.press({ key: 'aionas-chip-output_trim' })
-      await expectTip(ui, surface, 'output_trim', 'Noisy commands are shortened; long output shows only its start, its end and the errors. Click: back on.')
-      await ui.press({ key: 'aionas-chip-output_trim' })
+      await ui.press({ key: 'aionas-chip-subagent_sonnet' })
+      await expectTip(ui, surface, 'subagent_sonnet', 'Sub-agents that do not pick a model run on Sonnet. Click: back on.')
+      await ui.press({ key: 'aionas-chip-subagent_sonnet' })
       await ui.press({ key: 'aionas-chip-effort_default' })
       await expectTip(ui, surface, 'effort_default', TIPS_WINDOW)
       w.window = 'window\t-\t0\thigh'
@@ -547,7 +549,7 @@ describe('band: chips and the one-click bypass (M3)', () => {
   test('on the desktop a card near the right edge moves left to stay inside the band', async ($, on) => {
     world(on)
     await start($)
-    const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    const desk = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 209 } })
     expect((await cardOf(desk, 'write_minimum', 'desktop')).props.left).toBeLessThan(0)
     expect((await cardOf(desk, 'saved', 'desktop')).props.left).toBe(0)
   })
@@ -558,12 +560,12 @@ describe('band: chips and the one-click bypass (M3)', () => {
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ ...BAND, surface })
       const glyph = async (id: string) => (await ui.find({ key: `aionas-tipat-${id}` })).children[0].children[0]
-      expect((await glyph('output_trim')).props.color).toBe('success')
-      expect((await ui.find({ key: 'aionas-chip-output_trim' })).props.dimColor).toBe(false)
-      await ui.press({ key: 'aionas-chip-output_trim' })
-      expect((await glyph('output_trim')).props.dimColor).toBe(true)
-      expect((await ui.find({ key: 'aionas-chip-output_trim' })).props.dimColor).toBe(true)
-      await ui.press({ key: 'aionas-chip-output_trim' })
+      expect((await glyph('subagent_sonnet')).props.color).toBe('success')
+      expect((await ui.find({ key: 'aionas-chip-subagent_sonnet' })).props.dimColor).toBe(false)
+      await ui.press({ key: 'aionas-chip-subagent_sonnet' })
+      expect((await glyph('subagent_sonnet')).props.dimColor).toBe(true)
+      expect((await ui.find({ key: 'aionas-chip-subagent_sonnet' })).props.dimColor).toBe(true)
+      await ui.press({ key: 'aionas-chip-subagent_sonnet' })
       const off = await ui.find({ key: 'aionas-tipat-handoff' })
       expect(off.children[0].props.dimColor).toBe(true)
       await ui.unmount()
@@ -681,6 +683,12 @@ describe('band: chips and the one-click bypass (M3)', () => {
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     await ui.press({ key: 'aionas-compact' })
     expect(compacts).toBe(1)
+    // AIO-1022: while it is pending the button is a dim label; with no new
+    // size the button returns after a few seconds.
+    expect(await ui.find({ key: 'aionas-compact' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'Compacting…' })).toBeDefined()
+    await w.clock.advance(11_000)
+    expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
     await ui.press({ key: 'aionas-later' })
     expect(await ui.find({ key: 'aionas-compact' })).toBeUndefined()
     await measure($, 250000)
@@ -696,6 +704,146 @@ describe('band: chips and the one-click bypass (M3)', () => {
     await measure($, 120000)
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: '▲ Context 120K of 1M. Compact recommended.' })).toBeDefined()
+  })
+})
+
+describe('band: /compact once per press, and what it saved (AIO-1022, AIO-1023)', () => {
+  const handoffOn = (w: World) => (w.methods.handoff = { ...(w.methods.handoff as M), state: 'on', active: 1 })
+  const counts = (w: World): string[][] => w.argv.filter(a => a.includes('--count'))
+  const compactRuns = (on: On): { n: number } => {
+    const r = { n: 0 }
+    on('command.run', { command: 'compact' }, () => {
+      r.n += 1
+      return { text: 'compacted' }
+    })
+    return r
+  }
+  const warn = async ($: any, w: World): Promise<void> => {
+    w.methods.handoff = { ...(w.methods.handoff as M), state: 'on', active: 1 }
+    await start($)
+    await measure($, 209000)
+  }
+
+  test('four presses give one command.run and one count; "Compacting…" replaces the button on both surfaces', async ($, on) => {
+    const w = world(on)
+    const c = compactRuns(on)
+    await warn($, w)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
+      await ui.unmount()
+    }
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    // Four presses at once (the button is still drawn when they arrive), then three more.
+    await Promise.all([1, 2, 3, 4].map(() => ui.press({ key: 'aionas-compact' }).catch(() => undefined)))
+    for (let i = 0; i < 3; i++) await ui.press({ key: 'aionas-compact' }).catch(() => undefined)
+    await w.clock.settle()
+    expect(c.n).toBe(1)
+    expect(counts(w).length).toBe(1)
+    expect(counts(w)[0]?.slice(-3)).toEqual(['--count', 'handoff', 'compact_pressed'])
+    expect(await ui.find({ key: 'aionas-compact' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'Compacting…' })).toBeDefined()
+    const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await term.find({ type: 'Text', text: 'Compacting…' })).toBeDefined()
+  })
+
+  test('the context size falling draws the line once, the warning row goes, and it is not in saved since install', async ($, on) => {
+    const w = world(on)
+    compactRuns(on)
+    w.savings = SAVINGS_USD.replace('\t3.8\t46.2\t', '\t0\t0\t')
+    await warn($, w)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ type: 'Text', text: /No saving measured yet/ as never })).toBeDefined()
+      await ui.unmount()
+    }
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-compact' })
+    await w.clock.settle()
+    await measure($, 26000)
+    const line = 'Compacted: 209K → 26K tokens, about 183K fewer tokens on each next turn'
+    for (const surface of SURFACES) {
+      const u = await $.ui.mount({ ...BAND, surface })
+      expect(await u.find({ type: 'Text', text: line })).toBeDefined()
+      expect(await u.find({ key: 'aionas-warning' })).toBeUndefined()
+      // The tracked methods' figure is untouched: no "No saving measured yet", no figure from the action.
+      expect(textOf(await u.drawn())).not.toContain('No saving measured yet')
+      expect(textOf(await u.drawn())).not.toContain('$')
+      await u.unmount()
+    }
+    // Once per action: a later reading does not add a second line.
+    await measure($, 40000)
+    expect(textOf(await ui.drawn()).split('Compacted:').length).toBe(2)
+    expect(counts(w).length).toBe(1)
+  })
+
+  test('a failed /compact gives the button back and counts nothing', async ($, on) => {
+    const w = world(on)
+    on('command.run', { command: 'compact' }, () => {
+      throw new Error('refused')
+    })
+    await warn($, w)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-compact' })
+    await w.clock.settle()
+    expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
+    expect(counts(w).length).toBe(0)
+    expect(w.toasts.at(-1)).toMatch(/did not run/)
+  })
+
+  test('context still above compact_at after the run: the button returns, and a second press runs again', async ($, on) => {
+    const w = world(on)
+    const c = compactRuns(on)
+    await warn($, w)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-compact' })
+    await w.clock.advance(10_500)
+    expect(await ui.find({ key: 'aionas-compact' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Compacted:/ as never })).toBeUndefined()
+    await ui.press({ key: 'aionas-compact' })
+    expect(c.n).toBe(2)
+  })
+
+  test('a /compact the person types is not counted and draws no line', async ($, on) => {
+    const w = world(on)
+    compactRuns(on)
+    await warn($, w)
+    await $.command.run({ command: 'compact' })
+    await measure($, 26000)
+    expect(counts(w).length).toBe(0)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /Compacted:/ as never })).toBeUndefined()
+  })
+
+  test('handoff in the terminal: the new conversation\'s first size draws the line; the desktop says it starts without the old size', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    on('command.run', { command: 'clear' }, () => {
+      w.sessionId = 'sess-test-2'
+      return { text: '' }
+    })
+    on('prompt.fill', ($, e) => ({ isFilled: true, text: e.text, cursor: e.text.length }) as never)
+    w.handoff = `handoff\tdelivered\t0\t${T0 - 60}\t1`
+    await start($)
+    await measure($, 209000)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await ui.press({ key: 'aionas-handoff-new' })
+    await w.clock.advance(500)
+    await measure($, 12000)
+    expect(await ui.find({ type: 'Text', text: 'New conversation: 209K → 12K tokens, about 197K fewer tokens on each next turn' })).toBeDefined()
+    expect(counts(w).length).toBe(0)
+  })
+
+  test('handoff in the desktop app: this band cannot see the new session, so it says only what it left behind', async ($, on) => {
+    const w = world(on)
+    handoffOn(w)
+    w.handoff = `handoff\tdelivered\t0\t${T0 - 60}\t1`
+    await start($)
+    await measure($, 209000)
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await ui.press({ key: 'aionas-handoff-new' })
+    await w.clock.settle()
+    expect(await ui.find({ type: 'Text', text: "Continued in a new conversation: it starts without this chat's 209K tokens." })).toBeDefined()
   })
 })
 
@@ -823,10 +971,10 @@ describe('commands', () => {
   test('/aionas-bypass runs the script by argument vector and prints its line', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
-    const r = await $.command.run({ command: 'aionas-bypass', args: 'output_trim 2h debugging a flaky test; rm x' } as never)
-    expect(r.text).toContain('output_trim is off')
-    const ran = w.argv.find(a => a.some(x => x.endsWith('commands/aionas-bypass.sh')) && a.includes('output_trim'))
-    expect(ran?.slice(2)).toEqual(['output_trim', '2h', 'debugging', 'a', 'flaky', 'test;', 'rm', 'x'])
+    const r = await $.command.run({ command: 'aionas-bypass', args: 'unused_services 2h debugging a flaky test; rm x' } as never)
+    expect(r.text).toContain('unused_services is off')
+    const ran = w.argv.find(a => a.some(x => x.endsWith('commands/aionas-bypass.sh')) && a.includes('unused_services'))
+    expect(ran?.slice(2)).toEqual(['unused_services', '2h', 'debugging', 'a', 'flaky', 'test;', 'rm', 'x'])
   })
 
   test('/aionas-xhigh runs the script and prints its line', async ($, on) => {
@@ -1007,19 +1155,57 @@ describe('subagent_sonnet', () => {
     expect(models).toEqual(['sonnet', undefined, 'sonnet', 'opus'])
   })
 
-  test('each sub-agent start runs the counting script exactly once, before the model decision, whatever the method state', async ($, on) => {
+  // AIO-1073: counted (and recorded) only when the policy moved the agent.
+  const core = (w: World) => ($: unknown, e: { model?: string; parentModel: string }) => ({
+    model: e.model ?? w.env.get('CLAUDE_CODE_SUBAGENT_MODEL') ?? e.parentModel ?? 'claude-opus-4-7',
+    agentId: 'agent-1',
+  })
+  const starts = (w: World) => w.argv.map(a => a.join(' ')).filter(a => a.includes('--subagent-start')).map(a => a.split(' ').slice(-1)[0])
+
+  test('an agent that inherits the parent\'s Opus and is moved to Sonnet is counted exactly once, after it started', async ($, on) => {
     const w = world(on, 'high')
-    on('agent.spawn', () => ({ model: 'parent' }))
+    on('agent.spawn', core(w))
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
-    const calls = () => w.argv.map(a => a.join(' ')).filter(a => a.includes('--subagent-start') || a.includes('--subagent-model'))
-    await $.agent.spawn({ prompt: 'one' })
-    expect(calls().map(a => (a.includes('--subagent-start') ? 'count' : 'model'))).toEqual(['count', 'model'])
+    const r = await $.agent.spawn({ prompt: 'one' })
+    expect(r.model).toBe('sonnet')
+    expect(starts(w)).toEqual(['moved'])
+    const calls = w.argv.map(a => a.join(' ')).filter(a => a.includes('--subagent-start') || a.includes('--subagent-model'))
+    expect(calls.map(a => (a.includes('--subagent-start') ? 'count' : 'model'))).toEqual(['model', 'count'])
+  })
+
+  test('an agent spawned with its own model is no count and no record', async ($, on) => {
+    const w = world(on, 'high')
+    on('agent.spawn', core(w))
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: 'one', model: 'opus' })
+    await $.agent.spawn({ prompt: 'two', model: 'sonnet' })
+    expect(starts(w)).toEqual([])
+  })
+
+  test('an agent whose parent already runs on Sonnet is no count and no record', () => {
+    expect(subagentOutcome({ fork: false, parentModel: 'claude-sonnet-4-6' }, { model: 'sonnet', agentId: 'a' }, true)).toBeUndefined()
+    expect(subagentOutcome({ fork: true, parentModel: 'claude-opus-4-7' }, { model: 'claude-opus-4-7', agentId: 'a' }, true)).toBeUndefined()
+    expect(subagentOutcome({ model: 'haiku', fork: false, parentModel: 'claude-opus-4-7' }, { model: 'haiku', agentId: 'a' }, true)).toBeUndefined()
+    expect(subagentOutcome({ fork: false, parentModel: 'claude-opus-4-7' }, { deny: 'no' }, true)).toBeUndefined()
+    expect(subagentOutcome({ fork: false, parentModel: 'claude-opus-4-7' }, { model: 'sonnet', agentId: 'a' }, true)).toBe('moved')
+    // Sonnet the policy did not set (an agent definition's own, the person's own value) is not the method's.
+    expect(subagentOutcome({ fork: false, parentModel: 'claude-opus-4-7' }, { model: 'sonnet', agentId: 'a' }, false)).toBe('kept')
+    expect(subagentOutcome({ fork: false, parentModel: 'claude-opus-4-7' }, { model: 'claude-haiku-4-5', agentId: 'a' }, true)).toBe('kept')
+  })
+
+  test('while the method is bypassed the start is "kept" (the script counts skipped), and the mod passes no counter name', async ($, on) => {
+    const w = world(on, 'high')
+    on('agent.spawn', core(w))
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
     w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 0, until: w.now + 3600 }
     await $.agent.spawn({ prompt: 'two' })
-    expect(calls().filter(a => a.includes('--subagent-start'))).toHaveLength(2)
-    expect(calls().filter(a => a.includes('--subagent-model'))).toHaveLength(2)
-    // The count is the script's decision: the mod passes no method state and no counter name.
-    for (const a of w.argv.filter(x => x.join(' ').includes('--subagent-start'))) expect(a.slice(-1)).toEqual(['--subagent-start'])
+    expect(starts(w)).toEqual(['kept'])
+    // The person's own Sonnet is not the method's either.
+    w.methods.subagent_sonnet = { ...(w.methods.subagent_sonnet as M), active: 1, until: 0 }
+    w.env.set('AIONAS_SUBAGENT_MODEL_BASE', 'sonnet')
+    w.env.set('CLAUDE_CODE_SUBAGENT_MODEL', 'sonnet')
+    await $.agent.spawn({ prompt: 'three' })
+    expect(starts(w)).toEqual(['kept', 'kept'])
   })
 
   test('a sub-agent started before session start saves the person\'s own value first and keeps it', async ($, on) => {
@@ -1181,7 +1367,7 @@ describe('Git Bash on Windows (AIO-905)', () => {
     }
     // A command fails soft, still without starting a process.
     const before = w.argv.length
-    const r = await $.command.run({ command: 'aionas-bypass', args: 'output_trim' } as never)
+    const r = await $.command.run({ command: 'aionas-bypass', args: 'unused_services' } as never)
     expect(r.text).toContain('could not run')
     expect(w.argv.length).toBe(before)
     expect(scripts(w)).toEqual([])

@@ -35,8 +35,8 @@ test_lock_try_excludes_and_breaks_stale() {
 }
 
 test_catalog_closed_lists() {
-  t_ok aionas_is_method output_trim
-  t_ok aionas_is_method output_trim
+  t_ok aionas_is_method write_minimum
+  t_not aionas_is_method output_trim
   t_not aionas_is_method long_output_trim
   t_not aionas_is_method ''
   t_ok aionas_is_required cache_guard

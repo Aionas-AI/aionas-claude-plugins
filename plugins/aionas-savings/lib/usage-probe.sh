@@ -11,8 +11,10 @@
 # section: local folder names, skill, sub-agent and MCP names, request counts.
 # Prompts and replies never do. Claude Code fetches the figures with its own
 # login; Aionas never reads a token.
-# The one program run from PATH is claude. The child is started by a plain exec:
-# no env, no timeout and no perl, which a project could shadow on PATH.
+# Nothing is run from PATH (AIO-1072, finding 3): claude comes from its known
+# install places only (aionas_up_find_bin), never from inside the workspace,
+# and starts through /usr/bin/env -i with a short list of variables
+# (aionas_up_launch): no timeout and no perl, which a project could shadow.
 
 # The probe runs at most this often per computer (stamp), and is skipped when
 # the status-line tap stored a weekly figure this recently.
@@ -94,8 +96,51 @@ aionas_up_desktop_list() {
   done
 }
 
-# aionas_up_find_bin: print the claude binary to run, else exit 1.
-#   1. claude on PATH (an absolute, executable, regular file)
+# aionas_up_phys DIR: DIR with every symlink resolved; exit 1 when it is not a
+# folder that can be entered.
+aionas_up_phys() { (cd "$1" 2>/dev/null && pwd -P); }
+
+# aionas_up_in_workspace PATH: exit 0 (refuse) when PATH, or the target of a
+# PATH that is a symlink, lies inside the session's workspace: the current
+# folder or CLAUDE_PROJECT_DIR. A workspace that is the home folder itself is
+# not one here (every known place is under it). A path that cannot be
+# resolved counts as inside.
+aionas_up_in_workspace() {
+  # Every folder on the whole symlink chain (at most 40 hops; more, or a
+  # cycle, counts as inside) must lie outside the workspace.
+  _iw_dirs=$(aionas_up_phys "$(dirname "$1")") || return 0
+  _iw_p=$1 _iw_n=0
+  while [ -L "$_iw_p" ]; do
+    _iw_n=$((_iw_n + 1)); [ "$_iw_n" -le 40 ] || return 0
+    _iw_l=$(readlink "$_iw_p" 2>/dev/null) || return 0
+    case "$_iw_l" in /*) ;; *) _iw_l="$(dirname "$_iw_p")/$_iw_l" ;; esac
+    _iw_t=$(aionas_up_phys "$(dirname "$_iw_l")") || return 0
+    _iw_p="$_iw_t/$(basename "$_iw_l")"
+    _iw_dirs="$_iw_dirs
+$_iw_t"
+  done
+  _iw_h=$(aionas_up_phys "$(aionas_home)") || return 0
+  for _iw_w in "$PWD" "${CLAUDE_PROJECT_DIR:-}"; do
+    [ -n "$_iw_w" ] || continue
+    _iw_w=$(aionas_up_phys "$_iw_w") || continue
+    [ "$_iw_w" = "$_iw_h" ] && continue
+    [ "$_iw_w" = / ] && return 0
+    _iw_ifs=$IFS; IFS='
+'
+    for _iw_x in $_iw_dirs; do
+      case "$_iw_x/" in "$_iw_w"/*) IFS=$_iw_ifs; return 0 ;; esac
+    done
+    IFS=$_iw_ifs
+  done
+  return 1
+}
+
+# aionas_up_find_bin: print the claude binary to run, else exit 1. Never PATH
+# (a project or package can put its own claude there), and never a candidate
+# inside the workspace (aionas_up_in_workspace).
+#   1. the native installer's ~/.local/bin/claude (claude.exe on Windows), the
+#      old local install ~/.claude/local/claude, then /opt/homebrew/bin,
+#      /usr/local/bin and /usr/bin (an absolute, executable, regular file)
 #   2. macOS, Claude Desktop's bundled Claude Code, the newest version that has
 #      one: ~/Library/Application Support/Claude/claude-code/<X.Y.Z>/<12 hex>/claude.app/Contents/MacOS/claude
 #      (VERIFIED on a Mac with 2.1.304 and 2.1.308). The layout the issue text
@@ -106,8 +151,17 @@ aionas_up_desktop_list() {
 #   3. the VS Code extension's bundled binary, newest version (UNVERIFIED path).
 # Windows Desktop: no path is cited anywhere, so only PATH is tried there.
 aionas_up_find_bin() {
-  _fb=$(command -v claude 2>/dev/null)
-  if aionas_up_exec_file "$_fb"; then printf '%s\n' "$_fb"; return 0; fi
+  _fb=$(aionas_up_find_any) || return 1
+  aionas_up_in_workspace "$_fb" && return 1
+  printf '%s\n' "$_fb"
+}
+
+aionas_up_find_any() {
+  _fb_h=$(aionas_home)
+  for _fb in "$_fb_h/.local/bin/claude" "$_fb_h/.local/bin/claude.exe" "$_fb_h/.claude/local/claude" \
+    /opt/homebrew/bin/claude /usr/local/bin/claude /usr/bin/claude; do
+    if aionas_up_exec_file "$_fb"; then printf '%s\n' "$_fb"; return 0; fi
+  done
   if [ "$(aionas_os)" = darwin ]; then
     _fb_list=$(aionas_up_desktop_list)
     _fb=$(printf '%s\n' "$_fb_list" | awk -F '\t' '$1 == "V" { print $2; exit }')
@@ -135,7 +189,7 @@ aionas_up_iso() {
 # way to the binary, when it does: Claude Desktop's
 # .../claude-code/<X.Y.Z>/..., or the VS Code extension's
 # anthropic.claude-code-<X.Y.Z>[-<platform>]/... . Nothing is run to find out;
-# a binary found on PATH has no such folder, and no version is printed for it.
+# a native or system install has no such folder, and no version is printed for it.
 aionas_up_bin_version() {
   printf '%s\n' "$1" | awk '
     function num(t,   n) {
@@ -156,15 +210,7 @@ aionas_up_bin_version() {
 # savings/counters, NOT the queue: the gateway's counter list does not know
 # these names and rejects the whole batch (and the flush then drops every
 # pending row), so it never goes through aionas_counter_inc.
-aionas_up_count() {
-  _tl_d="$(aionas_savings_dir)/counters"
-  aionas_mkdir "$_tl_d" || return 0
-  _tl_n=$(cat "$_tl_d/$1" 2>/dev/null)
-  aionas_is_uint "${_tl_n:-x}" || _tl_n=0
-  [ "$_tl_n" -lt 1000000000 ] || return 0
-  printf '%s\n' $((_tl_n + 1)) | aionas_write_atomic "$_tl_d/$1"
-  return 0
-}
+aionas_up_count() { aionas_local_count "$1"; }
 aionas_up_too_large() { aionas_up_count usage_probe_too_large; }
 aionas_up_bad_text() { aionas_up_count usage_probe_bad_text; }
 
@@ -218,6 +264,25 @@ aionas_up_cleanup() {
   if [ -n "$_up_resp" ]; then rm -f "$_up_resp"; _up_resp=""; fi
   if [ -n "$_up_lockheld" ]; then aionas_lock_release usage-probe; _up_lockheld=""; fi
   return 0
+}
+
+# aionas_up_launch BIN: exec BIN -p /usage ... (in the caller's subshell)
+# through /usr/bin/env -i: a fixed PATH, AIONAS_USAGE_PROBE=1, and only the
+# variables Claude Code needs to find its login, its temp folder and the
+# network (proxies, CA files; on Windows the system folders). Nothing else of
+# the hook's environment (NODE_OPTIONS, DYLD_*, tokens) reaches the child.
+# No /usr/bin/env: exit 1, nothing runs.
+aionas_up_launch() {
+  [ -x /usr/bin/env ] || exit 1
+  _ul_bin=$1
+  set -- AIONAS_USAGE_PROBE=1 PATH=/usr/bin:/bin:/usr/sbin:/sbin
+  for _ul_n in HOME USER LOGNAME LANG LC_ALL LC_CTYPE TZ TMPDIR CLAUDE_CONFIG_DIR \
+    HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy NODE_EXTRA_CA_CERTS SSL_CERT_FILE SSL_CERT_DIR \
+    USERPROFILE APPDATA LOCALAPPDATA SYSTEMROOT SystemRoot WINDIR COMSPEC TEMP TMP HOMEDRIVE HOMEPATH; do
+    eval "_ul_v=\${$_ul_n-}"
+    [ -n "$_ul_v" ] && set -- "$@" "$_ul_n=$_ul_v"
+  done
+  exec /usr/bin/env -i "$@" "$_ul_bin" -p "/usage" --no-session-persistence --output-format json
 }
 
 # aionas_up_run: the whole hook. Always returns 0 and prints nothing.
@@ -289,7 +354,7 @@ EOF
   # (pgid = its pid), so a timeout or an oversize result can stop every process
   # it started, not just the first one.
   set -m 2>/dev/null
-  ( cd "$_r_pdir" && AIONAS_USAGE_PROBE=1 exec "$_r_bin" -p "/usage" --no-session-persistence --output-format json ) </dev/null >"$_up_out" 2>/dev/null &
+  ( cd "$_r_pdir" && aionas_up_launch "$_r_bin" ) </dev/null >"$_up_out" 2>/dev/null &
   _up_pid=$!
   set +m 2>/dev/null
 

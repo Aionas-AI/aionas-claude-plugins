@@ -155,6 +155,16 @@ aionas_override_local_add() {
   } | aionas_write_atomic "$_lo_dir/local-overrides.tsv"
 }
 
+# aionas_policy_has_capability NAME: exit 0 when the gateway's last good
+# policy answer listed NAME in "capabilities" (AIO-1077: counters_client,
+# requests_client, limit_guard). It reads the current cache, never a
+# session's pin: it is about the gateway now. Nothing cached, or an older
+# gateway that lists none: exit 1, and the plugin keeps the 0.6.1 wire.
+aionas_policy_has_capability() {
+  case "${1:-}" in '' | *[!a-z0-9_]*) return 2 ;; esac
+  awk -F '\t' -v c="$1" '$1 == "C" && $2 == c { f = 1; exit } END { exit f ? 0 : 1 }' "$(aionas_savings_dir)/policy.cache" 2>/dev/null
+}
+
 # --- internal -------------------------------------------------------------
 
 _aionas_sid_ok() {

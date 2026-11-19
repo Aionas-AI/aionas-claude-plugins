@@ -31,6 +31,16 @@
 #   spool/*.ev      one mark each: sid, prompt id, method, epoch, tokens
 #   last_failed     epoch of the last failed send (retry no sooner than 5 min)
 #   dropped         rows the server refused, summed
+#   cursor/spool/*.ev  the marks made under Cursor (AIO-1077, W33-5): sent,
+#                   each with "client":"cursor", only when the gateway's
+#                   policy lists requests_client; until then they wait (and
+#                   go after two days, like every mark). Claude Code's
+#                   records never carry "client", so their body is the 0.6.1
+#                   one byte for byte.
+#
+# Under Cursor the prompt id is Cursor's generation_id (its beforeSubmitPrompt
+# has no prompt_id; the generation_id is set per prompt and carried by the
+# turn's later hooks).
 
 AIONAS_REQUESTS_METHODS="subagent_sonnet handoff"
 AIONAS_REQUESTS_MAX_QUEUE=${AIONAS_REQUESTS_MAX_QUEUE:-200}
@@ -94,8 +104,8 @@ aionas_request_prompt() {
   return 0
 }
 
-# aionas_request_mark SID METHOD [PROMPT_ID] [TOKENS]: exit 2, queueing
-# nothing, for a method outside the list, an id outside the grammar or a bad
+# aionas_request_mark SID METHOD [PROMPT_ID] [TOKENS]: under Cursor the mark
+# goes to Cursor's spool (aionas_client). Exit 2, queueing nothing, for a method outside the list, an id outside the grammar or a bad
 # token count; 0 otherwise (also, doing nothing, on a computer that is not
 # enrolled or for a session with no current prompt). Prints nothing.
 aionas_request_mark() {
@@ -112,10 +122,13 @@ aionas_request_mark() {
     _rm_pid=$(cat "$_rm_dir/prompt.$_rm_sid" 2>/dev/null)
     aionas_request_id_ok "$_rm_pid" || return 0
   fi
-  aionas_spool_put "$_rm_dir/spool" "$(printf '%s\t%s\t%s\t%s\t%s' "$_rm_sid" "$_rm_pid" "$_rm_m" "$(aionas_now)" "$_rm_tok")"
+  _rm_sp="$_rm_dir/spool"
+  [ "$(aionas_client)" = cursor ] && _rm_sp="$_rm_dir/cursor/spool"
+  aionas_spool_put "$_rm_sp" "$(printf '%s\t%s\t%s\t%s\t%s' "$_rm_sid" "$_rm_pid" "$_rm_m" "$(aionas_now)" "$_rm_tok")"
 }
 
-# aionas_requests_body SID PROMPT METHOD EPOCH TOKENS: the request body.
+# aionas_requests_body SID PROMPT METHOD EPOCH TOKENS [CLIENT]: the request
+# body; CLIENT cursor adds "client" last, anything else adds nothing.
 # Every value was checked against its grammar before it was queued; this
 # checks again, so a hand-edited spool line never reaches the server.
 aionas_requests_body() {
@@ -127,6 +140,7 @@ aionas_requests_body() {
   printf '{"session_id":"%s","prompt_id":"%s","method":"%s","ts":"%s"' "$1" "$2" "$3" "$(aionas_iso_utc "$4")"
   [ -n "$_rb_ver" ] && printf ',"plugin_version":"%s"' "$_rb_ver"
   if [ -n "${5:-}" ] && aionas_is_uint "$5" && [ "$5" -ge 1 ] && [ "$5" -le "$AIONAS_REQUESTS_MAX_TOKENS" ]; then printf ',"tokens":%s' "$5"; fi
+  [ "${6:-}" = cursor ] && printf ',"client":"cursor"'
   printf '}\n'
 }
 
@@ -160,9 +174,38 @@ aionas_requests_flush() {
   # A session's prompt id is forgotten two days after its last prompt.
   find "$_rf_dir" -maxdepth 1 -type f -name 'prompt.*' -mtime +2 2>/dev/null |
     while IFS= read -r _rf_f; do rm -f "$_rf_f"; done
-  _rf_sp="$_rf_dir/spool"
+  _rf_any=0
+  _aionas_requests_send_spool "$_rf_dir/spool" '' "$_rf_start" "$_rf_now"
+  _rf_rc=$?
+  # Cursor's marks (AIO-1077): only to a gateway that accepts "client", and
+  # not after a failed send or the deadline.
+  if [ $_rf_rc -eq 0 ] && [ -d "$_rf_dir/cursor/spool" ] && aionas_policy_has_capability requests_client; then
+    _aionas_requests_send_spool "$_rf_dir/cursor/spool" cursor "$_rf_start" "$_rf_now"
+    _rf_rc=$?
+  fi
+  # Nothing was in a spool it may send, or its plan could not be written:
+  # last_failed is left as it was.
+  if [ $_rf_any -eq 0 ]; then aionas_lock_release requests; return 0; fi
+  if [ $_rf_rc -eq 6 ]; then aionas_lock_release requests; return 1; fi
+  if [ $_rf_rc -ne 0 ]; then
+    echo "$_rf_now" | aionas_write_atomic "$_rf_dir/last_failed"
+  else
+    rm -f "$_rf_dir/last_failed"
+  fi
+  aionas_lock_release requests
+  return $_rf_rc
+}
+
+# _aionas_requests_send_spool SPOOL CLIENT START NOW: send one spool's records
+# (CLIENT empty: Claude Code, no "client"; cursor: tagged). Exit 0, 1 or 3 as
+# aionas_requests_flush, 6 when the plan could not be written; sets _rf_any when the spool held a file. Called
+# under the requests lock.
+_aionas_requests_send_spool() {
+  _rf_dir=$(aionas_requests_dir)
+  _rf_sp=$1 _rf_cl=$2 _rf_start=$3 _rf_now=$4
   _rf_files=$(aionas_spool_list "$_rf_sp")
-  if [ -z "$_rf_files" ]; then aionas_lock_release requests; return 0; fi
+  [ -z "$_rf_files" ] && return 0
+  _rf_any=1
   # The plan: one line per record to send (sid prompt method epoch, the
   # spool files holding it space separated, tokens), oldest first, and a
   # "-" line for each file holding nothing to send (invalid, too old, past
@@ -186,7 +229,7 @@ aionas_requests_flush() {
       for (i = s; i <= nr; i++) { k = key[i]; print k "\t" at[k] "\t" fs[k] "\t" tok[k]; m = split(fs[key[i]], d, " "); for (j = 1; j <= m; j++) keep[d[j]] = 1 }
       for (i = 1; i <= nf; i++) if (!(file[i] in keep)) print "-\t" file[i]
     }' $_rf_files) >"$_rf_plan"; then
-    rm -f "$_rf_plan"; aionas_lock_release requests; return 1
+    rm -f "$_rf_plan"; return 6
   fi
   _rf_body="$_rf_dir/.body.$$"
   _rf_resp="$_rf_dir/.resp.$$"
@@ -197,7 +240,7 @@ aionas_requests_flush() {
   while IFS="$(printf '\t')" read -r _rf_sid _rf_pid _rf_m _rf_at _rf_fs _rf_tok; do
     if [ "$_rf_sid" = - ]; then printf '%s\n' "$_rf_pid" >>"$_rf_done"; continue; fi
     [ "$_rf_stop" -eq 1 ] || aionas_flush_may_send "$_rf_start" || _rf_stop=1
-    if [ "$_rf_stop" -eq 0 ] && aionas_requests_body "$_rf_sid" "$_rf_pid" "$_rf_m" "$_rf_at" "$_rf_tok" >"$_rf_body"; then
+    if [ "$_rf_stop" -eq 0 ] && aionas_requests_body "$_rf_sid" "$_rf_pid" "$_rf_m" "$_rf_at" "$_rf_tok" "$_rf_cl" >"$_rf_body"; then
       _rf_code=$(aionas_http POST /enroll/v1/savings/requests "$_rf_body" "$_rf_resp")
       _rf_r=$?
       if [ $_rf_r -eq 0 ]; then
@@ -223,11 +266,5 @@ aionas_requests_flush() {
     rm -f "$_rf_sp/$_rf_f"
   done
   rm -f "$_rf_body" "$_rf_resp" "$_rf_plan" "$_rf_done" "$_rf_held"
-  if [ $_rf_rc -ne 0 ]; then
-    echo "$_rf_now" | aionas_write_atomic "$_rf_dir/last_failed"
-  else
-    rm -f "$_rf_dir/last_failed"
-  fi
-  aionas_lock_release requests
   return $_rf_rc
 }

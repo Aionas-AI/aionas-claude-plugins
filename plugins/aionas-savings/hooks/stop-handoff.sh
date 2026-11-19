@@ -14,7 +14,16 @@
 # Test seams: AIONAS_HANDOFF_IDLE_SECONDS, AIONAS_HANDOFF_POLL_SECONDS (default 20),
 # AIONAS_HANDOFF_BUSY_SECONDS (a sub-agent written this recently is running; default 180),
 # AIONAS_HANDOFF_SETTLE_SECONDS (longest wait for this turn's answer; default 15).
+#
+# The wait is off the turn's critical path in Claude Code only: Claude Code
+# runs this entry with asyncRewake (hooks.json), so the turn ends at once and
+# this process waits in the background. Cursor ignores async/asyncRewake and
+# holds the end of its turn until the hook exits, and its transcript never
+# holds Claude Code's usage numbers, so the wait always ran its full 15 s
+# there (Cursor hooks log, 2026-11-19). Under Cursor this hook exits 0 at once,
+# before any wait (AIO-1077).
 . "$(dirname "$0")/handoff-wake.sh"
+aionas_claude_code_only
 
 _in=$(cat 2>/dev/null)
 _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)

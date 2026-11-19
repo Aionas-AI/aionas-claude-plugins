@@ -5,6 +5,7 @@
 # there is nothing to say. Local files only: no network, never blocks.
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || { cat >/dev/null 2>&1; exit 0; }
 . "$AIONAS_LIB/unused.sh" 2>/dev/null || { cat >/dev/null 2>&1; exit 0; }
+aionas_claude_code_only # Claude Code only: exits 0 at once under Cursor (AIO-1077)
 cat >/dev/null 2>&1
 aionas_unused_notice 2>/dev/null
 exit 0

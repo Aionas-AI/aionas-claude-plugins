@@ -8,6 +8,7 @@
 # Never blocks, never prints, always exits 0. Method: unused_services.
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || { cat >/dev/null 2>&1; exit 0; }
 . "$AIONAS_LIB/unused.sh" 2>/dev/null || { cat >/dev/null 2>&1; exit 0; }
+aionas_claude_code_only # Claude Code only: exits 0 at once under Cursor (AIO-1077)
 input=$(cat 2>/dev/null)
 flat=$(printf '%s' "$input" | aionas_json_flatten 2>/dev/null)
 sid=$(printf '%s\n' "$flat" | aionas_json_get session_id 2>/dev/null)

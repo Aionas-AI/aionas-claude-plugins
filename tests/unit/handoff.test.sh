@@ -566,4 +566,30 @@ test_aio1072_a_transcript_path_with_a_quote_still_arms_the_timer() {
   t_contains "$(cat "$RUN/err")" "about 30K tokens"
 }
 
+# AIO-1077: the settle wait never holds a turn's end. Claude Code runs the
+# Stop entry with asyncRewake, so its turn ends at once and the wait runs in
+# the background; once this turn's answer is in the transcript the hook
+# decides at once, whatever the settle limit; and under Cursor (which ignores
+# asyncRewake) the hook exits before any wait (tests/unit/cursor-client.test.sh).
+test_stop_entry_stays_async_rewake_so_claude_code_never_waits_on_it() {
+  local got
+  got=$(aionas_json_flatten "$HOOKS/hooks.json" | awk -F '\t' '
+    $1 ~ /^hooks\.Stop\.0\.hooks\.[0-9]+\.command$/ && $3 ~ /handoff-arm\.sh/ { split($1, a, "."); i = a[5] }
+    { v[$1] = $3 }
+    END { print v["hooks.Stop.0.hooks." i ".asyncRewake"] }')
+  t_eq true "$got"
+}
+
+test_stop_with_this_turns_answer_written_decides_at_once() {
+  policy_low
+  local f t1 t2 in
+  f=$(transcript 15000)
+  in=$(stop_input "$f")
+  t1=$(perl -MTime::HiRes=time -e 'printf "%d", time() * 1000')
+  printf '%s' "$in" | AIONAS_HANDOFF_SETTLE_SECONDS=15 bash "$HOOKS/handoff-arm.sh"
+  t2=$(perl -MTime::HiRes=time -e 'printf "%d", time() * 1000')
+  [ $((t2 - t1)) -lt 1000 ] || t_fail "took $((t2 - t1)) ms"
+  t_not test -e "$(hdir)/$SID.armed"
+}
+
 t_main "$@"

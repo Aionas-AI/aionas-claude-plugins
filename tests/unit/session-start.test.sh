@@ -39,13 +39,20 @@ test_policy_sync_unreachable_keeps_cache_makes_one_call_and_exits_0() {
 test_policy_sync_sends_counters_and_pending_overrides_when_reachable() {
   t_enroll; export FAKE_CURL_STATUS=200 FAKE_CURL_BODY="$FIX/policy.json"
   mkdir -p "$(aionas_savings_dir)/counters" "$(aionas_savings_dir)/pending-overrides"
-  printf '2026-10-20\thandoff\tfired\t3\n' >"$(aionas_savings_dir)/counters/queue.tsv"
+  # Days relative to the real clock (this test does not pin AIONAS_NOW): one
+  # row inside the 30-day prune window, one 31 days old that must be pruned.
+  local now day old
+  now=$(date +%s); day=$(aionas_day_utc "$now"); old=$(aionas_day_utc $((now - 31 * 86400)))
+  printf '%s\thandoff\tfired\t3\n%s\thandoff\tskipped\t7\n' "$day" "$old" >"$(aionas_savings_dir)/counters/queue.tsv"
   printf '{"method_id":"handoff","duration_seconds":60}\n' >"$(aionas_savings_dir)/pending-overrides/1.1.json"
   hook policy-sync.sh >/dev/null
   t_eq 3 "$(t_calls)"
   t_eq https://gw.example.test/enroll/v1/savings/overrides "$(t_call 2 url)"
   t_eq https://gw.example.test/enroll/v1/savings/counters "$(t_call 3 url)"
   t_contains "$(t_call 3 body)" '"method_id":"handoff","counter":"fired","value":3'
+  t_contains "$(t_call 3 body)" "\"$day\""
+  t_lacks "$(t_call 3 body)" '"counter":"skipped"' "the row older than 30 days is pruned, not sent"
+  t_lacks "$(t_call 3 body)" "$old"
   t_eq 0 "$(ls "$(aionas_savings_dir)/pending-overrides" | grep -c json)"
 }
 

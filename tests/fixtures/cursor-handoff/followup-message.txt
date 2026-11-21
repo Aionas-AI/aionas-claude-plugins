@@ -1,0 +1,5 @@
+[aionas-handoff] This conversation is about 210K tokens long, and every new message in it sends all of that again. Do this now, and nothing else:
+1. Write a handoff document for a fresh chat to @HANDOFF_FILE@ (replace that file if it exists: an earlier doc of this chat is out of date). Start it with the line "Previous conversation: @SID@ (it stays in Cursor's chat history)". Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
+2. Print a short starting prompt for the new chat (two or three sentences that point at that file).
+3. Tell the developer, in one sentence, what they can do now in Cursor: open a new chat (the + / New Chat button of the chat panel) and paste that starting prompt; this chat stays in the history.
+Do not run any command for this and do not change any setting. When these are done, say the handoff is ready and stop.

@@ -31,12 +31,31 @@
 # input status / loop_count / input_tokens / cache_read_tokens). Once per
 # conversation (the .done marker), only for status completed and loop_count 0
 # (the follow-up's own stop has loop_count 1). Size: numbers of the stop payload
-# only, no transcript is opened.
+# only, no transcript is opened. The offer has its own wording
+# (aionas_cursor_handoff_instruction, W33-10): Cursor has no aionas band, no
+# launcher and no "claude --resume", so it names only what the person can do
+# in Cursor: a new chat with the starting prompt; the old one stays in the
+# chat history.
 . "$(dirname "$0")/handoff-wake.sh"
+
+# aionas_cursor_handoff_instruction SID TOKENS: the follow-up text for Cursor.
+# Same handoff document path as Claude Code's (handoff-<sid>.md, the person's
+# own local file); no launcher is written.
+aionas_cursor_handoff_instruction() {
+  local md
+  md="$(aionas_handoff_dir)/handoff-$1.md"
+  cat <<MSG
+[aionas-handoff] This conversation is about $(($2 / 1000))K tokens long, and every new message in it sends all of that again. Do this now, and nothing else:
+1. Write a handoff document for a fresh chat to $md (replace that file if it exists: an earlier doc of this chat is out of date). Start it with the line "Previous conversation: $1 (it stays in Cursor's chat history)". Cover: the goal; what is done; what is left, in order; decisions and why; the files and commands that matter; how to check the work; open questions. Leave out secrets and credentials.
+2. Print a short starting prompt for the new chat (two or three sentences that point at that file).
+3. Tell the developer, in one sentence, what they can do now in Cursor: open a new chat (the + / New Chat button of the chat panel) and paste that starting prompt; this chat stays in the history.
+Do not run any command for this and do not change any setting. When these are done, say the handoff is ready and stop.
+MSG
+}
 
 # aionas_cursor_stop PAYLOAD: the Cursor branch. Prints the follow-up JSON or nothing.
 aionas_cursor_stop() {
-  local flat sid status loop tok th cwd msg
+  local flat sid status loop tok th msg
   flat=$(printf '%s' "$1" | aionas_json_flatten 2>/dev/null)
   sid=$(printf '%s\n' "$flat" | aionas_json_get session_id)
   _aionas_sid_ok "$sid" || sid=$(printf '%s\n' "$flat" | aionas_json_get conversation_id)
@@ -59,12 +78,10 @@ aionas_cursor_stop() {
   th=$(aionas_policy_param handoff threshold_tokens "$sid" 2>/dev/null)
   aionas_is_uint "$th" && [ "$th" -ge 1 ] || th=$AIONAS_HANDOFF_DEFAULT_TOKENS
   [ "$tok" -ge "$th" ] || return 0
-  cwd=$(printf '%s\n' "$flat" | aionas_json_get_str workspace_roots.0)
-  [ -n "$cwd" ] || cwd=$PWD
   aionas_mkdir "$(aionas_handoff_dir)" || return 0
   # Whoever creates the marker wins: exactly one offer.
   ( set -C; : >"$(aionas_handoff_dir)/$sid.done" ) 2>/dev/null || return 0
-  if ! msg=$(aionas_handoff_instruction "$sid" "$cwd" "$tok" 0); then
+  if ! msg=$(aionas_cursor_handoff_instruction "$sid" "$tok"); then
     rm -f "$(aionas_handoff_dir)/$sid.done"
     return 0
   fi

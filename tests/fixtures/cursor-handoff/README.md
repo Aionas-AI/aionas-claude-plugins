@@ -10,3 +10,8 @@ placeholders as there.
 - `stop-loop1.json`: the stop of the follow-up turn (`loop_count` 1)
 - `stop-aborted.json`: `status` aborted
 - `stop-context-tokens.json`: carries `context_tokens` 230000 (preCompact's name) beside small input numbers
+
+`followup-message.txt` is the exact `followup_message` text the hook answers
+for `stop-at-threshold.json` (W33-10: Cursor's own wording, no band, no
+launcher, no `claude --resume`). `@HANDOFF_FILE@` and `@SID@` stand for the
+person's local handoff file and the conversation id.

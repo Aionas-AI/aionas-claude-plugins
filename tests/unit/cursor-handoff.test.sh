@@ -61,6 +61,25 @@ test_counter_is_tagged_cursor() {
   t_eq "" "$(t_counters)" "nothing in Claude Code's queue"
 }
 
+# followup: the decoded followup_message text of OUT.
+followup() { printf '%s' "$OUT" | aionas_json_flatten | aionas_json_get_str followup_message; }
+
+test_the_offer_has_cursor_wording() {
+  t_enroll; policy 200000
+  stop stop-at-threshold.json
+  local want
+  want=$(sed -e "s|@HANDOFF_FILE@|$(hdir)/handoff-$CSID.md|" -e "s|@SID@|$CSID|" "$FX/followup-message.txt")
+  t_eq "$want" "$(followup)" "the exact Cursor text (fixture followup-message.txt)"
+  # nothing Cursor does not have
+  t_lacks "$(followup)" "claude --resume"
+  t_lacks "$(followup)" "band"
+  t_lacks "$(followup)" "Continue in a new conversation"
+  t_lacks "$(followup)" "/compact"
+  t_contains "$(followup)" "new chat"
+  # no launcher (opener-<sid>.*) is written for Cursor
+  t_eq "" "$(find "$(hdir)" -name 'opener-*' 2>/dev/null)"
+}
+
 test_loop_count_one_and_aborted_say_nothing() {
   t_enroll; policy 200000
   stop stop-loop1.json; t_eq "" "$OUT"; t_not test -e "$(hdir)/$CSID.done"

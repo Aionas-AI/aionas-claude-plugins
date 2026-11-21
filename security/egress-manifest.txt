@@ -69,6 +69,7 @@ http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
 http POST /enroll/v1/savings/requests
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run
+net plugins/aionas-savings/hooks/branch-report.sh: ssh
 public GET /api/aionas/onboarding/scripts/
 run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental
 run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental

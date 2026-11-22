@@ -116,6 +116,9 @@ _aionas_sid_ok "$_sid" || exit 0
 _tr=$(printf '%s\n' "$_flat" | aionas_json_get_str transcript_path)
 _cwd=$(printf '%s\n' "$_flat" | aionas_json_get_str cwd)
 _pid=$(printf '%s\n' "$_flat" | aionas_json_get prompt_id)
+# Claude Desktop's Stop input has no prompt_id (AIO-1099): the turn's id is
+# the transcript's latest promptId (its user line is written when it starts).
+_aionas_sid_ok "$_pid" || _pid=$(aionas_transcript_prompt_id "$_tr" 2>/dev/null)
 _aionas_sid_ok "$_pid" || _pid=''
 
 # Policy: off or released -> nothing; bypassed on this computer -> count once.

@@ -7,12 +7,19 @@
 # Runs under Cursor too (AIO-1077): Cursor's beforeSubmitPrompt has no
 # prompt_id, so its generation_id (one per prompt) is the prompt id there, and
 # the marks of that turn go to Cursor's spool (lib/requests.sh).
+# Claude Desktop's Code tab sends no prompt_id (AIO-1099): the hook then
+# passes the input's transcript_path, whose "promptId" the marks read
+# (lib/requests.sh); only that id is ever taken from it.
 set -u
 . "$(dirname "$0")/../lib/aionas.sh" 2>/dev/null || exit 0
 _in=$(cat 2>/dev/null) || _in=''
 _flat=$(printf '%s' "$_in" | aionas_json_flatten 2>/dev/null)
-_key=prompt_id
-[ "$(aionas_client)" = cursor ] && _key=generation_id
+_key=prompt_id _tr=''
+if [ "$(aionas_client)" = cursor ]; then
+  _key=generation_id
+else
+  _tr=$(printf '%s\n' "$_flat" | aionas_json_get_str transcript_path)
+fi
 aionas_request_prompt "$(printf '%s\n' "$_flat" | aionas_json_get session_id)" \
-  "$(printf '%s\n' "$_flat" | aionas_json_get "$_key")" >/dev/null 2>&1
+  "$(printf '%s\n' "$_flat" | aionas_json_get "$_key")" "$_tr" >/dev/null 2>&1
 exit 0

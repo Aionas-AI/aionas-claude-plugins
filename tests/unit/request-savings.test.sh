@@ -10,7 +10,13 @@ BYPASS="$T_PLUGIN/commands/aionas-bypass.sh"
 RD() { echo "$(aionas_savings_dir)/requests"; }
 spooled() { cat "$(RD)"/spool/*.ev 2>/dev/null | awk 'END { print NR }'; }
 # What Claude Code sends to the UserPromptSubmit and Stop hooks.
-prompt_in() { printf '{"session_id":"%s","prompt_id":"%s","transcript_path":"/x/y.jsonl","cwd":"/x","hook_event_name":"UserPromptSubmit","prompt":"secret words"}' "$1" "$2"; }
+# An empty PROMPT_ID leaves the field out, as Claude Desktop does (AIO-1099),
+# never an empty string.
+prompt_in() {
+  local pid=''
+  [ -n "${2:-}" ] && pid=",\"prompt_id\":\"$2\""
+  printf '{"session_id":"%s","transcript_path":"/x/y.jsonl","cwd":"/x","permission_mode":"default","hook_event_name":"UserPromptSubmit","prompt":"secret words"%s}' "$1" "$pid"
+}
 stop_in() { printf '{"session_id":"%s","prompt_id":"%s","transcript_path":"/x/y.jsonl","cwd":"/x","hook_event_name":"Stop","stop_hook_active":false}' "$1" "$2"; }
 submit() { prompt_in "$1" "$2" | bash "$PROMPTHOOK"; }
 # A sub-agent the policy moved to Sonnet (what the mod runs after the spawn).
@@ -43,13 +49,22 @@ test_the_prompt_hook_keeps_the_prompt_id_and_never_the_prompt() {
 test_a_mark_in_a_session_with_no_prompt_is_dropped() {
   t_enroll; export AIONAS_NOW=$T0
   t_rc 0 aionas_request_mark sess-1 subagent_sonnet
-  submit sess-2 p2
-  # A prompt Claude Code sent without an id forgets the session's last one.
-  submit sess-2 ""
-  t_rc 0 aionas_request_mark sess-2 subagent_sonnet
   t_eq 0 "$(spooled)"
   t_rc 0 aionas_requests_flush
   t_eq 0 "$(t_calls)"
+}
+
+# W33-13 (AIO-1099): a prompt without the field (and no readable transcript)
+# never erases the session's stored id.
+test_a_prompt_without_the_field_keeps_the_stored_id() {
+  t_enroll; export AIONAS_NOW=$T0
+  submit sess-2 p2
+  submit sess-2 ""
+  t_eq p2 "$(cat "$(RD)/prompt.sess-2")"
+  t_rc 0 aionas_request_mark sess-2 subagent_sonnet
+  t_eq 1 "$(spooled)"
+  t_rc 0 aionas_requests_flush
+  t_contains "$(bodies)" '"prompt_id":"p2"'
 }
 
 # AIO-1073 acceptance: turn A spawns a sub-agent and is cancelled before its

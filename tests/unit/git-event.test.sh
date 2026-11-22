@@ -7,7 +7,8 @@ HOOK="$T_PLUGIN/hooks/git-event.sh"
 FIX="$T_REPO/tests/fixtures/git-event"
 T0=1792490400 # 2026-10-20T10:00:00Z
 SID=2c9d7b1e-5a4f-4e3d-9c8b-1a2b3c4d5e6f
-G=(git -c user.name=t -c user.email=t@example.test)
+# Commits are dated at T0, the hook's clock, so they count as just made.
+G=(env GIT_AUTHOR_DATE=@$T0 GIT_COMMITTER_DATE=@$T0 git -c user.name=t -c user.email=t@example.test)
 
 capable() { printf 'V\t1\nC\tsession_git_events\n' >"$(aionas_savings_dir)/policy.cache"; }
 setup() { t_enroll; export AIONAS_NOW=$T0; mkdir -p "$(aionas_savings_dir)"; capable; }
@@ -39,6 +40,18 @@ test_a_commit_sends_the_event_with_client_claude_code() {
   t_eq POST "$(t_call 1 method)"
   t_eq "https://gw.example.test/enroll/v1/cc-session-git" "$(t_call 1 url)"
   t_eq "{\"session_id\":\"$SID\",\"event\":\"commit\",\"branch\":\"feat/billing-export\",\"head_sha\":\"$sha\",\"observed_at\":\"2026-10-20T10:00:00Z\",\"repo\":\"billing-api\",\"client\":\"claude_code\"}" "$(body 1)"
+}
+
+test_a_failed_commit_on_an_old_head_is_not_reported_as_the_first_event() {
+  setup
+  local d
+  d=$(repo main)
+  # HEAD is an hour old: a "git commit" that made nothing (even if the app
+  # reported the call as a success) must not send it.
+  AIONAS_NOW=$((T0 + 3600)) run cc-commit "$d"
+  t_eq 0 "$(t_calls)"
+  AIONAS_NOW=$((T0 + 300)) run cc-commit "$d"
+  t_eq 1 "$(t_calls)" "within ten minutes it is the commit just made"
 }
 
 test_the_same_commit_is_sent_once_and_a_new_one_again() {

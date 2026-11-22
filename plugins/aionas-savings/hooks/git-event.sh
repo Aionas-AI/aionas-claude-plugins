@@ -162,6 +162,15 @@ $ev
   [ -f "$last" ] && [ "$(cat "$last" 2>/dev/null)" = "$sha" ] && continue
   pr_field=""
   case "$ev" in
+    commit)
+      # A commit that just happened: HEAD's committer time is within 10
+      # minutes of now. A failed "git commit" (nothing to commit) leaves an
+      # older HEAD, so a session's first event cannot report it.
+      ct=$(git -C "$cwd" log -1 --format=%ct HEAD 2>/dev/null) || continue
+      case "$ct" in "" | *[!0-9]*) continue ;; esac
+      now=$(aionas_now)
+      [ $((now - ct)) -le 600 ] && [ $((ct - now)) -le 600 ] || continue
+      ;;
     push)
       up=$(git -C "$cwd" rev-parse '@{u}' 2>/dev/null) || continue
       [ "$up" = "$sha" ] || continue

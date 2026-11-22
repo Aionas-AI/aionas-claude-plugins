@@ -72,6 +72,12 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/request-prompt.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/branch-report.sh\"",
+            "async": true,
+            "timeout": 10
           }
         ]
       }
@@ -90,6 +96,19 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\"",
             "async": true,
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Shell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/git-event.sh\"",
+            "async": true,
+            "timeout": 15
           }
         ]
       }

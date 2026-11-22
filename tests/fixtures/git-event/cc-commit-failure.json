@@ -1,0 +1,14 @@
+{
+  "session_id": "2c9d7b1e-5a4f-4e3d-9c8b-1a2b3c4d5e6f",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git commit -m \"secret message\"",
+    "description": "CANARY-DESCRIPTION"
+  },
+  "error": "Exit code 1\nSTDERR-CANARY nothing to commit", "is_interrupt": false,
+  "tool_use_id": "toolu_00000000000000000000test"
+}

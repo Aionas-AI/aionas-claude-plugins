@@ -1,0 +1,14 @@
+{
+  "session_id": "2c9d7b1e-5a4f-4e3d-9c8b-1a2b3c4d5e6f",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git add -A && git commit -m \"secret message\"",
+    "description": "CANARY-DESCRIPTION"
+  },
+  "tool_response": {"stdout": "STDOUT-CANARY [main abc1234] ok", "stderr": "STDERR-CANARY", "interrupted": false, "isImage": false, "noOutputExpected": false},
+  "tool_use_id": "toolu_00000000000000000000test"
+}

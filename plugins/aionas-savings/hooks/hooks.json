@@ -72,6 +72,12 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/request-prompt.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/branch-report.sh\"",
+            "async": true,
+            "timeout": 10
           }
         ]
       }

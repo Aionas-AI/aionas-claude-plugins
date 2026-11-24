@@ -7,9 +7,11 @@ file plugins/aionas-savings/commands/aionas-bypass.sh
 file plugins/aionas-savings/commands/aionas-handoff.md
 file plugins/aionas-savings/commands/aionas-xhigh.sh
 file plugins/aionas-savings/hooks/band.tsx
+file plugins/aionas-savings/hooks/branch-report.sh
 file plugins/aionas-savings/hooks/counters-flush.sh
 file plugins/aionas-savings/hooks/daily-scan.sh
 file plugins/aionas-savings/hooks/effort-window.sh
+file plugins/aionas-savings/hooks/git-event.sh
 file plugins/aionas-savings/hooks/handoff-arm.sh
 file plugins/aionas-savings/hooks/handoff-cancel.sh
 file plugins/aionas-savings/hooks/handoff-wake.sh
@@ -33,6 +35,7 @@ file plugins/aionas-savings/lib/enroll.sh
 file plugins/aionas-savings/lib/http.sh
 file plugins/aionas-savings/lib/json.awk
 file plugins/aionas-savings/lib/json.sh
+file plugins/aionas-savings/lib/limit-guard.sh
 file plugins/aionas-savings/lib/platform.sh
 file plugins/aionas-savings/lib/policy.awk
 file plugins/aionas-savings/lib/policy.sh
@@ -45,9 +48,11 @@ file plugins/aionas-savings/lib/unused.sh
 file plugins/aionas-savings/lib/usage-probe.sh
 file plugins/aionas-savings/security/script-allowlist.txt
 file plugins/aionas-savings/tsconfig.json
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/branch-report.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/counters-flush.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/daily-scan.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/effort-window.sh\""
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/git-event.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handoff-arm.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handoff-cancel.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/plan-report.sh\""
@@ -62,6 +67,7 @@ hook plugins/aionas-savings/hooks/hooks.json "modules": ["./mod.tsx"]
 http GET /enroll/v1/savings/policy
 http GET /enroll/v1/scripts/manifest
 http POST /cc-quota/v1/samples
+http POST /enroll/v1/cc-session-git
 http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
 http POST /enroll/v1/savings/requests

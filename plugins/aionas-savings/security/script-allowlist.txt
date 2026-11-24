@@ -11,3 +11,11 @@ aionas-plan-usage.sh b4ca3de9144a6b2e77f3790874fd716237e24af3dfe183fc0b3def2816a
 aionas-statusline-tap.sh 268484f2ec99497ac22224a156337fd09e72a032c729340ec559c3d761535818
 aionas-plan-usage.ps1 2b162cb17bf42cffdad32c774ac73d55a654ab682d174e4e2904b673eea7ac54
 aionas-statusline-tap.ps1 520233b35114f23736e4a9d06b156c04da73afb73e422b3dfe4b5a313c52b3f5
+# gateway v0.33.0 (AIO-1076, AIO-1083): the plan-usage scripts and taps changed
+# (window figures, release stamp), and the Cursor reporter is delivered too.
+aionas-plan-usage.sh 8371aa1642c63ad06ecd296bce65ae988a9435a4a29f32fcccca5c5287f3022b
+aionas-statusline-tap.sh ad52608d33f00cb142d714d8d3ff87651e244a1ee6bded2a36044bf249d10b34
+aionas-plan-usage.ps1 5156436e49cf4880650dedc1c5bee894604df60122fb74c899dd190633d0b991
+aionas-statusline-tap.ps1 89b761ce6c7c9c4751a2e37a76e65b03885abf038cc9b9d5aa1d6c9fa16ac699
+aionas-cursor-hooks-reporter.sh 946fd713427a818f0fa0bf219ebc96e96f26e0c849a344226b03b828c774bcdc
+aionas-cursor-hooks-reporter.ps1 e59dcb788e334381efd5d5a89bcc2a0f68ba9f4832f533179f8fbcec2f887cac

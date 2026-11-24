@@ -4,7 +4,9 @@
 # extension never renders the status line, so the status-line tap sends no
 # weekly figure. This runs Claude Code's own /usage command, once every 4 hours, and
 # sends its whole text to the organization's own gateway, which reads the
-# figure out of it. The plugin does not parse the text.
+# figure out of it. The plugin does not parse the text for the gateway; the one
+# thing it keeps is the Fable weekly figure, locally, for the limit guard
+# (lib/limit-guard.sh, W33-10), which sends nothing of it.
 #
 # Privacy (the owner's ruling): the full text of the result goes to the
 # organization's gateway, including Claude Code's own "what's contributing"
@@ -417,6 +419,12 @@ EOF
   aionas_is_uint "${_r_len:-x}" || return 0
   _r_len=$((_r_len - 1))
   if [ "$_r_len" -gt "$AIONAS_UP_MAX_RESULT" ]; then aionas_up_too_large; return 0; fi
+  # The limit guard (AIO-1083, W33-10) keeps the Fable weekly figure of this
+  # text locally (usage-probe-fable.last, numbers only; nothing more is sent).
+  # The reading lives in lib/limit-guard.sh; the text below goes out unchanged.
+  if . "$AIONAS_LIB/limit-guard.sh" 2>/dev/null; then
+    printf '%s\n' "$_r_raw" | aionas_json_unescape | aionas_lg_fable_record >/dev/null 2>&1
+  fi
   _r_now=$(aionas_now)
   _r_observed=$(aionas_up_iso "$_r_now")
   [ -n "$_r_observed" ] || return 0

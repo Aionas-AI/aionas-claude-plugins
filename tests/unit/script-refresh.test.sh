@@ -541,8 +541,22 @@ test_aio1072_without_the_shipped_allowlist_nothing_is_installed() {
 test_aio1072_the_shipped_allowlist_is_well_formed() {
   local f="$T_PLUGIN/security/script-allowlist.txt" n
   t_ok test -f "$f"
-  t_eq "" "$(grep -vE '^(#|$)' "$f" | grep -vE '^aionas-(plan-usage|statusline-tap)\.(sh|ps1) [0-9a-f]{64}$')" "name sha256 lines only"
+  t_eq "" "$(grep -vE '^(#|$)' "$f" | grep -vE '^aionas-(plan-usage|statusline-tap|cursor-hooks-reporter)\.(sh|ps1) [0-9a-f]{64}$')" "name sha256 lines only"
   for n in $NAMES; do t_ok grep -q "^$n " "$f"; done
+}
+
+# AIO-1076: the Cursor reporter pair is a delivered script too (gateway v0.33.0).
+test_aio1076_the_cursor_reporter_pair_is_a_refreshable_name_with_a_pin() {
+  local f="$T_PLUGIN/security/script-allowlist.txt" n
+  . "$T_PLUGIN/lib/script-refresh.sh"
+  for n in aionas-cursor-hooks-reporter.sh aionas-cursor-hooks-reporter.ps1; do
+    t_ok aionas_sr_name_ok "$n"
+    t_ok grep -qE "^$n [0-9a-f]{64}$" "$f"
+    case " $AIONAS_SR_NAMES " in *" $n "*) ;; *) t_fail "$n missing from AIONAS_SR_NAMES" ;; esac
+  done
+  t_eq 6 "$(printf '%s\n' $AIONAS_SR_NAMES | wc -l | tr -d ' ')" "exactly six names"
+  aionas_sr_name_ok aionas-cursor-hooks-reporter.evil && t_fail "a lookalike name was accepted"
+  return 0
 }
 
 # The real curl against a local stub: the manifest asks with the alias, the

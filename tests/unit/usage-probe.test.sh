@@ -837,4 +837,118 @@ test_aio1072_the_child_gets_a_minimal_environment() {
   t_eq 1 "$(t_calls)" "the sample is still sent"
 }
 
+# --- W33-10: the Fable weekly figure feeds the limit guard (AIO-1083) ----------
+# The probe hands the text to lib/limit-guard.sh, which keeps only
+# "<pct>|<reset>|<at>" of the "Current week (Fable):" line, locally. The body
+# sent is the same as before; the guard then acts on the figure like on the
+# 5-hour window: 80 % warns (the mod moves sub-agents to Sonnet), 90 % only
+# suggests, a stale or missing reading is not measured (F10).
+
+# lg_policy: a cached policy with limit_guard on and its capability listed.
+lg_policy() {
+  mkdir -p "$(aionas_savings_dir)"
+  printf 'V\t1\nF\t1\nM\tlimit_guard\ton\t0\t1\t1\t0\nC\tlimit_guard\n' >"$(aionas_savings_dir)/policy.cache"
+}
+# lg: what the mod runs, its one line.
+# (In a subshell without the app variables: the test may itself run inside
+# Claude Code, and env is a tripwire on this PATH.)
+lg() { (unset CURSOR_VERSION CLAUDECODE; bash "$T_PLUGIN/lib/limit-guard.sh" state s1 </dev/null); }
+lg_line() { printf 'limit\t%s\t%s\t%s\t%s' "$@"; }
+fable_file() { echo "$(aionas_savings_dir)/usage-probe-fable.last"; }
+# Nov 3 at 5:59am in Jerusalem (UTC+2 in November) = 03:59 UTC.
+FABLE_RESET=$(epoch_of 2026-11-03T03:59:00Z)
+fable_text() { printf 'Current session: 3%% used · resets 8:00am (UTC)\\nCurrent week (all models): 41%% used · resets Nov 3 at 5:59am (Asia/Jerusalem)\\nCurrent week (Fable): %s%% used · resets %s (Asia/Jerusalem)' "$1" "${2:-Nov 3 at 5:59am}"; }
+
+test_w33_fable_79_80_90_reach_the_guard_and_the_body_is_unchanged() {
+  up_setup; lg_policy
+  local p want
+  for p in 79 80 90; do
+    fresh_hour
+    usage_out "$(fable_text "$p")"
+    hook
+    t_eq "$(want_body "$(fable_text "$p")")" "$(body)" "the body sent is the same as without the guard ($p)"
+    t_eq "$p|$FABLE_RESET|$NOW0" "$(cat "$(fable_file)")" "only numbers are kept ($p)"
+  done
+  t_eq 3 "$(t_calls)"
+}
+
+test_w33_fable_thresholds_79_ok_80_warn_90_suggest() {
+  up_setup; lg_policy
+  local p lv
+  for p in 79:ok 80:warn 90:suggest; do
+    lv=${p#*:}; p=${p%%:*}
+    fresh_hour
+    usage_out "$(fable_text "$p")"
+    hook
+    t_eq "$(lg_line "$lv" fable_week "$p" "$FABLE_RESET")" "$(lg)" "$p %"
+  done
+}
+
+test_w33_the_real_capture_keeps_its_fable_figure() {
+  up_setup; lg_policy
+  hook
+  t_eq "1|$FABLE_RESET|$NOW0" "$(cat "$(fable_file)")"
+  t_eq "$(lg_line ok fable_week 1 "$FABLE_RESET")" "$(lg)"
+}
+
+test_w33_a_stale_fable_reading_is_not_measured() {
+  up_setup; lg_policy
+  usage_out "$(fable_text 95)"
+  hook
+  t_eq "$(lg_line suggest fable_week 95 "$FABLE_RESET")" "$(lg)"
+  # the week it describes is over: nothing is shown, nothing switches
+  t_eq "$(lg_line unmeasured - 0 0)" "$(AIONAS_NOW=$FABLE_RESET lg)"
+  t_eq "$(lg_line unmeasured - 0 0)" "$(AIONAS_NOW=$((FABLE_RESET + 3600)) lg)"
+  # a text whose reset is already past is not kept at all
+  rm -f "$(fable_file)"; fresh_hour
+  usage_out "$(fable_text 95 'Oct 30 at 5:59am')"
+  hook
+  t_eq 2 "$(t_calls)" "the text is still sent"
+  t_not test -e "$(fable_file)"
+  t_eq "$(lg_line unmeasured - 0 0)" "$(lg)"
+}
+
+test_w33_a_missing_fable_line_keeps_nothing_and_is_not_measured() {
+  up_setup; lg_policy
+  usage_out 'Current week (all models): 88% used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
+  hook
+  t_eq 1 "$(t_calls)" "sent whole"
+  t_not test -e "$(fable_file)"
+  t_eq "$(lg_line unmeasured - 0 0)" "$(lg)" "the all-models figure is not Fable's"
+  # an unreadable Fable line is the same as none
+  fresh_hour
+  usage_out 'Current week (Fable): lots used · resets Nov 3 at 5:59am (Asia/Jerusalem)'
+  hook
+  t_not test -e "$(fable_file)"
+  t_eq "$(lg_line unmeasured - 0 0)" "$(lg)"
+}
+
+test_w33_an_error_result_keeps_no_fable_figure() {
+  up_setup; lg_policy
+  usage_out "$(fable_text 92)" usage true
+  hook
+  t_eq 0 "$(t_calls)"
+  t_not test -e "$(fable_file)"
+}
+
+test_w33_under_cursor_nothing_is_probed_or_kept() {
+  up_setup; lg_policy
+  usage_out "$(fable_text 92)"
+  stub_env
+  bash "$HOOK" <"$T_REPO/tests/fixtures/cursor/session-start.json"
+  t_eq 0 "$(runs)" "no probe under Cursor"
+  t_eq 0 "$(t_calls)"
+  t_not test -e "$(fable_file)"
+  # a reading kept by Claude Code earlier: the guard still says nothing under Cursor
+  printf '92|%s|%s' "$FABLE_RESET" "$NOW0" >"$(fable_file)"
+  t_eq "" "$(unset CLAUDECODE; CURSOR_VERSION=3.23.23 bash "$T_PLUGIN/lib/limit-guard.sh" state s1 </dev/null)"
+}
+
+test_w33_the_kept_fable_file_holds_numbers_only() {
+  up_setup; lg_policy
+  hook
+  t_ok grep -Eq '^[0-9]+(\.[0-9]+)?\|[0-9]+\|[0-9]+$' "$(fable_file)"
+  t_lacks "$(cat "$(fable_file)")" "Fable"
+}
+
 t_main "$@"

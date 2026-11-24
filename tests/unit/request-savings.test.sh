@@ -10,7 +10,13 @@ BYPASS="$T_PLUGIN/commands/aionas-bypass.sh"
 RD() { echo "$(aionas_savings_dir)/requests"; }
 spooled() { cat "$(RD)"/spool/*.ev 2>/dev/null | awk 'END { print NR }'; }
 # What Claude Code sends to the UserPromptSubmit and Stop hooks.
-prompt_in() { printf '{"session_id":"%s","prompt_id":"%s","transcript_path":"/x/y.jsonl","cwd":"/x","hook_event_name":"UserPromptSubmit","prompt":"secret words"}' "$1" "$2"; }
+# An empty PROMPT_ID leaves the field out, as Claude Desktop does (AIO-1099),
+# never an empty string.
+prompt_in() {
+  local pid=''
+  [ -n "${2:-}" ] && pid=",\"prompt_id\":\"$2\""
+  printf '{"session_id":"%s","transcript_path":"/x/y.jsonl","cwd":"/x","permission_mode":"default","hook_event_name":"UserPromptSubmit","prompt":"secret words"%s}' "$1" "$pid"
+}
 stop_in() { printf '{"session_id":"%s","prompt_id":"%s","transcript_path":"/x/y.jsonl","cwd":"/x","hook_event_name":"Stop","stop_hook_active":false}' "$1" "$2"; }
 submit() { prompt_in "$1" "$2" | bash "$PROMPTHOOK"; }
 # A sub-agent the policy moved to Sonnet (what the mod runs after the spawn).
@@ -28,7 +34,7 @@ test_a_mark_takes_the_sessions_current_prompt_and_is_one_exact_post() {
   t_eq POST "$(t_call 1 method)"
   t_eq https://gw.example.test/enroll/v1/savings/requests "$(t_call 1 url)"
   t_contains "$(t_call 1 headers)" "Authorization: Bearer $T_ALIAS"
-  t_eq '{"session_id":"sess-1","prompt_id":"prompt-9","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1"}' "$(t_call 1 body)"
+  t_eq '{"session_id":"sess-1","prompt_id":"prompt-9","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0"}' "$(t_call 1 body)"
   t_eq 0 "$(spooled)"
 }
 
@@ -43,13 +49,22 @@ test_the_prompt_hook_keeps_the_prompt_id_and_never_the_prompt() {
 test_a_mark_in_a_session_with_no_prompt_is_dropped() {
   t_enroll; export AIONAS_NOW=$T0
   t_rc 0 aionas_request_mark sess-1 subagent_sonnet
-  submit sess-2 p2
-  # A prompt Claude Code sent without an id forgets the session's last one.
-  submit sess-2 ""
-  t_rc 0 aionas_request_mark sess-2 subagent_sonnet
   t_eq 0 "$(spooled)"
   t_rc 0 aionas_requests_flush
   t_eq 0 "$(t_calls)"
+}
+
+# W33-13 (AIO-1099): a prompt without the field (and no readable transcript)
+# never erases the session's stored id.
+test_a_prompt_without_the_field_keeps_the_stored_id() {
+  t_enroll; export AIONAS_NOW=$T0
+  submit sess-2 p2
+  submit sess-2 ""
+  t_eq p2 "$(cat "$(RD)/prompt.sess-2")"
+  t_rc 0 aionas_request_mark sess-2 subagent_sonnet
+  t_eq 1 "$(spooled)"
+  t_rc 0 aionas_requests_flush
+  t_contains "$(bodies)" '"prompt_id":"p2"'
 }
 
 # AIO-1073 acceptance: turn A spawns a sub-agent and is cancelled before its
@@ -61,7 +76,7 @@ test_an_interrupted_turns_mark_never_goes_to_the_next_turn() {
   # (cancelled: no Stop for A)
   submit sess-1 prompt-B
   stop_in sess-1 prompt-B | bash "$STOPHOOK"
-  t_eq '{"session_id":"sess-1","prompt_id":"prompt-A","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1"}' "$(bodies)"
+  t_eq '{"session_id":"sess-1","prompt_id":"prompt-A","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0"}' "$(bodies)"
   t_lacks "$(bodies)" prompt-B
 }
 
@@ -84,8 +99,8 @@ test_tokens_are_kept_and_each_method_is_its_own_post() {
   aionas_request_mark sess-1 subagent_sonnet
   t_rc 0 aionas_requests_flush
   t_eq 2 "$(t_calls)"
-  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"handoff","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1","tokens":1500}' "$(bodies | grep handoff)"
-  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.6.1"}' "$(bodies | grep subagent_sonnet)"
+  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"handoff","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0","tokens":1500}' "$(bodies | grep handoff)"
+  t_eq '{"session_id":"sess-1","prompt_id":"p1","method":"subagent_sonnet","ts":"2026-10-20T10:00:00Z","plugin_version":"0.7.0"}' "$(bodies | grep subagent_sonnet)"
 }
 
 test_two_prompts_are_two_records() {

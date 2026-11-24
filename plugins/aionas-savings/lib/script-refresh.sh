@@ -4,12 +4,12 @@
 # network.
 
 # The only files this feature may ever touch in ~/.aionas/agent/tools.
-AIONAS_SR_NAMES="aionas-plan-usage.sh aionas-statusline-tap.sh aionas-plan-usage.ps1 aionas-statusline-tap.ps1"
+AIONAS_SR_NAMES="aionas-plan-usage.sh aionas-statusline-tap.sh aionas-plan-usage.ps1 aionas-statusline-tap.ps1 aionas-cursor-hooks-reporter.sh aionas-cursor-hooks-reporter.ps1"
 
-# aionas_sr_name_ok NAME: exit 0 for exactly one of the four names.
+# aionas_sr_name_ok NAME: exit 0 for exactly one of the six names.
 aionas_sr_name_ok() {
   case "$1" in
-    aionas-plan-usage.sh | aionas-statusline-tap.sh | aionas-plan-usage.ps1 | aionas-statusline-tap.ps1) return 0 ;;
+    aionas-plan-usage.sh | aionas-statusline-tap.sh | aionas-plan-usage.ps1 | aionas-statusline-tap.ps1 | aionas-cursor-hooks-reporter.sh | aionas-cursor-hooks-reporter.ps1) return 0 ;;
   esac
   return 1
 }

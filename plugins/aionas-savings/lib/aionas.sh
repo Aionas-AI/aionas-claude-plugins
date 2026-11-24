@@ -26,6 +26,7 @@ AIONAS_PLUGIN_ROOT=${AIONAS_PLUGIN_ROOT:-$(dirname "$AIONAS_LIB")}
 . "$AIONAS_LIB/policy.sh"
 . "$AIONAS_LIB/counters.sh"
 . "$AIONAS_LIB/requests.sh"
+. "$AIONAS_LIB/events.sh"
 
 # aionas_plugin_version: the version in .claude-plugin/plugin.json.
 aionas_plugin_version() {

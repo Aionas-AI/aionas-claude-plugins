@@ -153,7 +153,7 @@ test_daily_scan_runs_incremental_once_a_day() {
   t_enroll; fake_scanner; export AIONAS_NOW=$T0
   t_eq "" "$(hook daily-scan.sh)"
   t_ok wait_for "$HOME/scan.log"
-  t_eq "--incremental" "$(cat "$HOME/scan.log")"
+  t_eq "--incremental --post --gateway https://gw.example.test" "$(cat "$HOME/scan.log")"
   hook daily-scan.sh; sleep 0.3
   t_eq 1 "$(wc -l <"$HOME/scan.log" | tr -d ' ')" "ran twice the same day"
   export AIONAS_NOW=$((T0 + 86400))
@@ -171,7 +171,7 @@ test_daily_scan_finds_the_scanner_in_tools_first_then_bin() {
   chmod +x "$HOME/.aionas/agent/bin/aionas-scan"
   hook daily-scan.sh
   t_ok wait_for "$HOME/scan.log"
-  t_eq "--incremental" "$(cat "$HOME/scan.log")" "tools/ must win over bin/"
+  t_eq "--incremental --post --gateway https://gw.example.test" "$(cat "$HOME/scan.log")" "tools/ must win over bin/"
 }
 
 test_daily_scan_returns_at_once_while_the_scanner_runs() {

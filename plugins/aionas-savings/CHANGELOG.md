@@ -2,6 +2,11 @@
 
 Each release is the git tag `aionas-savings-vX.Y.Z`. With auto-update on, Claude Code picks a release up from the marketplace; it applies from the next session.
 
+## Unreleased
+
+- **The daily history scan now uploads what it reads.** Since the first release the SessionStart hook ran `aionas-scan --incremental` without `--post`. The scanner's default is not to send, so it counted the day's history, moved its position forward, marked the day as scanned and sent nothing. The plan-usage backup job then saw "scanned today" and skipped. Every day the plugin was active was lost for good, which is why "saved since install" saw only about a tenth of the real use (found 2026-11-24 on a customer environment). The hook now runs `aionas-scan --incremental --post --gateway <the enrolled gateway>`. Days already lost are not recovered by this change; only a full scan (`--mode full`) sends them again.
+- **Session starts and compactions are reported** (AIO‑925): two new async hooks send one metadata event each to `POST /enroll/v1/sessions/events`. SessionStart sends `session_id` and `source` (`startup`, `resume`, `clear`, `compact` or `fork`). PreCompact sends `session_id` and `trigger` (`manual` when the member typed `/compact`, `auto` when Claude Code compacted on its own). Plus `ts` and `plugin_version`; nothing else. What the member typed after `/compact` (`custom_instructions`) is never read. One try, no retry, never delays a session or a compaction. The gateway route has been live since v0.28.0; this code was written for 0.6.0 on 2026-11-03 but was left out of the 0.6.1 release. New: `lib/events.sh`, `hooks/session-event.sh`, `hooks/precompact-event.sh`, and the route in `security/egress-manifest.txt`.
+
 ## 0.6.1 (2026-11-19)
 
 - **Second review round (AIO‑1072):** the settings rewrite's temporary file is created exclusively with `mktemp` (a planted file or link at a predictable name can no longer be written through), and the usage probe follows a `claude` symlink chain to its end (at most 40 hops) and refuses it if any folder on the way is inside the workspace.

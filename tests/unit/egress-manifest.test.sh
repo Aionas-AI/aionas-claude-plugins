@@ -70,12 +70,12 @@ test_band_names_drop_c1_and_bidi_controls() {
 # daily-scan.sh starts no program but the scanner.
 test_aio1072_the_scanners_delegated_upload_is_listed() {
   local m; m=$(cat "$T_REPO/security/egress-manifest.txt")
-  t_contains "$m" 'delegated plugins/aionas-savings/hooks/daily-scan.sh: aionas-scan --incremental -> POST /enroll/v1/savings/retro'
+  t_contains "$m" 'delegated plugins/aionas-savings/hooks/daily-scan.sh: aionas-scan --incremental --post -> POST /enroll/v1/savings/retro'
   t_contains "$m" 'totals[]{day,repo,project_path,kind,key,count,sessions,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,tokens,cost_usd}'
-  t_contains "$m" 'run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental'
+  t_contains "$m" 'run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental --post --gateway "$gw"'
   t_eq "" "$(grep '^run plugins/aionas-savings/hooks/daily-scan.sh: ' "$T_REPO/security/egress-manifest.txt" |
-    grep -vxF -e 'run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental' \
-      -e 'run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental')" "only the scanner is started"
+    grep -vxF -e 'run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental --post --gateway "$gw"' \
+      -e 'run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental --post --gateway "$gw"')" "only the scanner is started"
 }
 
 test_aio1072_another_program_started_by_daily_scan_is_listed() {
@@ -94,7 +94,8 @@ test_aio1072_daily_scan_starts_only_the_scanner_and_nothing_from_path() {
   chmod +x "$HOME/.aionas/agent/tools/aionas-scan"
   PATH="$trip:$PATH" bash "$T_PLUGIN/hooks/daily-scan.sh" </dev/null
   local i=0; while [ ! -f "$HOME/scan-args" ] && [ $i -lt 25 ]; do sleep 0.2; i=$((i + 1)); done
-  t_eq "--incremental" "$(cat "$HOME/scan-args" 2>/dev/null)" "the scanner ran"
+  # --post: without it the scanner sends nothing and the day is lost (2026-11-24).
+  t_eq "--incremental --post --gateway https://gw.example.test" "$(cat "$HOME/scan-args" 2>/dev/null)" "the scanner ran and uploads"
   t_eq "" "$(cat "$HOME/tripped" 2>/dev/null)" "nothing else ran from PATH"
   t_eq 0 "$(t_calls)" "no request of the hook's own"
 }

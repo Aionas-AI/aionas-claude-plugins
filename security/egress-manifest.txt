@@ -1,4 +1,4 @@
-delegated plugins/aionas-savings/hooks/daily-scan.sh: aionas-scan --incremental -> POST /enroll/v1/savings/retro with the enrollment alias: run{source,mode,status,sessions,scanner_version}, totals[]{day,repo,project_path,kind,key,count,sessions,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,tokens,cost_usd}
+delegated plugins/aionas-savings/hooks/daily-scan.sh: aionas-scan --incremental --post -> POST /enroll/v1/savings/retro with the enrollment alias: run{source,mode,status,sessions,scanner_version}, totals[]{day,repo,project_path,kind,key,count,sessions,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,tokens,cost_usd}
 file plugins/aionas-savings/.claude-plugin/plugin.json
 file plugins/aionas-savings/CHANGELOG.md
 file plugins/aionas-savings/README.md
@@ -17,8 +17,10 @@ file plugins/aionas-savings/hooks/hooks.json
 file plugins/aionas-savings/hooks/mod.tsx
 file plugins/aionas-savings/hooks/plan-report.sh
 file plugins/aionas-savings/hooks/policy-sync.sh
+file plugins/aionas-savings/hooks/precompact-event.sh
 file plugins/aionas-savings/hooks/request-prompt.sh
 file plugins/aionas-savings/hooks/script-refresh.sh
+file plugins/aionas-savings/hooks/session-event.sh
 file plugins/aionas-savings/hooks/stop-handoff.sh
 file plugins/aionas-savings/hooks/unused-services-notice.sh
 file plugins/aionas-savings/hooks/unused-services.sh
@@ -30,6 +32,7 @@ file plugins/aionas-savings/lib/catalog.sh
 file plugins/aionas-savings/lib/claude-account.sh
 file plugins/aionas-savings/lib/counters.sh
 file plugins/aionas-savings/lib/enroll.sh
+file plugins/aionas-savings/lib/events.sh
 file plugins/aionas-savings/lib/http.sh
 file plugins/aionas-savings/lib/json.awk
 file plugins/aionas-savings/lib/json.sh
@@ -52,8 +55,10 @@ hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/handoff-cancel.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/plan-report.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/policy-sync.sh\""
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-event.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/request-prompt.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/script-refresh.sh\""
+hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-event.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services-notice.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unused-services.sh\""
 hook plugins/aionas-savings/hooks/hooks.json "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/usage-probe.sh\""
@@ -65,7 +70,8 @@ http POST /cc-quota/v1/samples
 http POST /enroll/v1/savings/counters
 http POST /enroll/v1/savings/overrides
 http POST /enroll/v1/savings/requests
+http POST /enroll/v1/sessions/events
 mod plugins/aionas-savings/hooks/mod.tsx: $.process.run
 public GET /api/aionas/onboarding/scripts/
-run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental
-run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental
+run plugins/aionas-savings/hooks/daily-scan.sh: "$bin" --incremental --post --gateway "$gw"
+run plugins/aionas-savings/hooks/daily-scan.sh: /usr/bin/nice -n 19 "$bin" --incremental --post --gateway "$gw"
